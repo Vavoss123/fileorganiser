@@ -1,7 +1,7 @@
 """File Organiser - a small Windows desktop app for tidying a cluttered folder.
 
 The app always shows you a plan first. Scanning and hashing never change
-anything on disk; files move only when you press "Apply selected moves", and
+anything on disk; files move only when you press "Tidy", and
 that run can be undone. Nothing is ever permanently deleted: duplicates go to
 the Recycle Bin, and only when you ask.
 """
@@ -32,6 +32,46 @@ STARTUP_CHOICES = {
     "tray": "Keep tidying from the tray",
 }
 PAD = 10
+WINDOW_PAD = 18
+
+
+def plural(count: int, one: str, many: str | None = None) -> str:
+    """"1 file", "3 files"."""
+    return "{:,} {}".format(count, one if count == 1 else (many or one + "s"))
+
+
+class Tooltip:
+    """A short explanation that appears when the mouse rests on a widget."""
+
+    def __init__(self, widget: tk.Widget, text: str, delay: int = 450) -> None:
+        self.widget, self.text, self.delay = widget, text, delay
+        self.window: tk.Toplevel | None = None
+        self.pending: str | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._hide()
+        self.pending = self.widget.after(self.delay, self._show)
+
+    def _show(self) -> None:
+        self.pending = None
+        x = self.widget.winfo_rootx() + 8
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self.window = tk.Toplevel(self.widget)
+        self.window.wm_overrideredirect(True)
+        self.window.wm_geometry("+{}+{}".format(x, y))
+        ttk.Label(self.window, text=self.text, style="Tooltip.TLabel", wraplength=320,
+                  justify="left").pack()
+
+    def _hide(self, _event=None) -> None:
+        if self.pending:
+            self.widget.after_cancel(self.pending)
+            self.pending = None
+        if self.window is not None:
+            self.window.destroy()
+            self.window = None
 
 
 def human_size(count: int) -> str:
@@ -96,7 +136,7 @@ def open_path(path: str, parent: tk.Misc | None = None) -> None:
 
 class OrganiserApp(ttk.Frame):
     def __init__(self, master: tk.Tk) -> None:
-        super().__init__(master, padding=PAD)
+        super().__init__(master, padding=WINDOW_PAD)
         self.master = master
         self.settings = config.load()
         self.events: queue.Queue = queue.Queue()
@@ -119,7 +159,10 @@ class OrganiserApp(ttk.Frame):
             value=DATE_CHOICES.get(self.settings.get("date_folders"), DATE_CHOICES["off"])
         )
         self.startup_var = tk.StringVar(value=STARTUP_CHOICES[startup.current_mode()])
-        self.status_var = tk.StringVar(value="Pick a folder and press Scan.")
+        self.status_var = tk.StringVar(
+            value="Choose a folder, then press Scan folder. Nothing changes until you press Tidy."
+        )
+        self.advanced_var = tk.BooleanVar(value=bool(self.settings.get("advanced")))
         self.theme_var = tk.StringVar(
             value=theme.CHOICES.get(self.settings.get("theme"), theme.CHOICES["system"])
         )
@@ -135,108 +178,238 @@ class OrganiserApp(ttk.Frame):
 
     def _build(self) -> None:
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
-
-        chooser = ttk.Frame(self)
-        chooser.grid(row=0, column=0, sticky="ew")
-        chooser.columnconfigure(1, weight=1)
-        ttk.Label(chooser, text="Folder to tidy").grid(row=0, column=0, padx=(0, 8))
-        entry = ttk.Entry(chooser, textvariable=self.folder_var)
-        entry.grid(row=0, column=1, sticky="ew")
-        entry.bind("<Return>", lambda _e: self.start_scan(show_graph=True))
-        ttk.Button(chooser, text="Browse…", command=self.browse).grid(row=0, column=2, padx=6)
-        self.scan_button = ttk.Button(
-            chooser, text="Scan", command=lambda: self.start_scan(show_graph=True)
-        )
-        self.scan_button.grid(row=0, column=3)
-
-        options = ttk.Labelframe(self, text="Options", padding=8)
-        options.grid(row=1, column=0, sticky="ew", pady=(PAD, PAD))
-        ttk.Label(options, text="Look into subfolders:").grid(row=0, column=0, sticky="w")
-        ttk.Spinbox(
-            options, from_=0, to=4, width=4, textvariable=self.depth_var, state="readonly"
-        ).grid(row=0, column=1, sticky="w", padx=(6, 18))
-        ttk.Checkbutton(
-            options,
-            text="Send photos, videos and documents to my user libraries",
-            variable=self.libraries_var,
-        ).grid(row=0, column=2, sticky="w", padx=(0, 18))
-        ttk.Checkbutton(
-            options,
-            text="Put unrecognised files in 'Other'",
-            variable=self.other_var,
-        ).grid(row=1, column=2, sticky="w", pady=(4, 0))
-        ttk.Checkbutton(
-            options, text="Look for duplicates", variable=self.duplicates_var
-        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
-        ttk.Label(options, text="Date folders for photos and videos:").grid(
-            row=2, column=0, columnspan=2, sticky="w", pady=(4, 0)
-        )
-        ttk.Combobox(
-            options,
-            textvariable=self.date_var,
-            values=list(DATE_CHOICES.values()),
-            state="readonly",
-            width=18,
-        ).grid(row=2, column=2, sticky="w", pady=(4, 0))
-        if sys.platform == "win32":
-            ttk.Label(options, text="When I sign in:").grid(
-                row=3, column=0, columnspan=2, sticky="w", pady=(4, 0)
-            )
-            choices = [STARTUP_CHOICES["off"], STARTUP_CHOICES["auto"]]
-            if tray.available():
-                choices.append(STARTUP_CHOICES["tray"])
-            startup_box = ttk.Combobox(
-                options, textvariable=self.startup_var, values=choices, state="readonly",
-                width=34,
-            )
-            startup_box.grid(row=3, column=2, sticky="w", pady=(4, 0))
-            startup_box.bind("<<ComboboxSelected>>", lambda _e: self._change_startup())
-        options.columnconfigure(3, weight=1)
-        ttk.Button(options, text="Custom rules…", command=self.edit_rules).grid(
-            row=0, column=3, sticky="e"
-        )
-        look = ttk.Frame(options)
-        look.grid(row=1, column=3, rowspan=2, sticky="ne", pady=(4, 0))
-        ttk.Label(look, text="Theme").pack(side="left", padx=(0, 6))
-        theme_box = ttk.Combobox(
-            look, textvariable=self.theme_var, values=list(theme.CHOICES.values()),
-            state="readonly", width=16,
-        )
-        theme_box.pack(side="left")
-        theme_box.bind("<<ComboboxSelected>>", lambda _e: self._change_theme())
+        self.rowconfigure(3, weight=1)
+        self._build_header().grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        self._build_folder_card().grid(row=1, column=0, sticky="ew")
+        self._build_summary().grid(row=2, column=0, sticky="ew", pady=(12, 12))
 
         self.tabs = ttk.Notebook(self)
-        self.tabs.grid(row=2, column=0, sticky="nsew")
-        self.tabs.add(self._build_plan_tab(), text="Plan")
+        self.tabs.grid(row=3, column=0, sticky="nsew")
         self.graph_view = GraphView(
             self, on_toggle=self._toggle_move, on_reveal=reveal,
             on_open=lambda path: open_path(path, self),
             settings=self.settings.get("graph"),
             mode=theme.resolve(self.settings.get("theme", "system")),
         )
-        self.tabs.add(self.graph_view, text="Graph")
-        self.tabs.add(self._build_duplicates_tab(), text="Duplicates")
-        self.tabs.add(self._build_versions_tab(), text="Possible versions")
-        self.tabs.add(self._build_installers_tab(), text="Old installers")
-        self.tabs.add(self._build_log_tab(), text="Log")
+        self.tabs.add(self.graph_view, text="Map")
+        self.plan_page = self._build_plan_tab()
+        self.tabs.add(self.plan_page, text="Files to move")
+        self.duplicates_page = self._build_duplicates_tab()
+        self.tabs.add(self.duplicates_page, text="Duplicates")
+        self.versions_page = self._build_versions_tab()
+        self.tabs.add(self.versions_page, text="Similar names")
+        self.installers_page = self._build_installers_tab()
+        self.tabs.add(self.installers_page, text="Old installers")
+        self.log_page = self._build_log_tab()
+        self.tabs.add(self.log_page, text="Activity")
 
         footer = ttk.Frame(self)
-        footer.grid(row=3, column=0, sticky="ew", pady=(PAD, 0))
-        footer.columnconfigure(1, weight=1)
-        self.progress = ttk.Progressbar(footer, mode="determinate", length=180)
-        self.progress.grid(row=0, column=0, padx=(0, 10))
-        ttk.Label(footer, textvariable=self.status_var).grid(row=0, column=1, sticky="w")
+        footer.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        footer.columnconfigure(0, weight=1)
+        ttk.Label(footer, textvariable=self.status_var, style="Muted.TLabel").grid(
+            row=0, column=0, sticky="w"
+        )
+        self.progress = ttk.Progressbar(footer, mode="determinate", length=220)
+        self.progress.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        self.progress.grid_remove()
         self.undo_button = ttk.Button(
-            footer, text="Undo…", command=self.undo_last, state="disabled"
+            footer, text="Undo a tidy…", command=self.undo_last, state="disabled"
         )
-        self.undo_button.grid(row=0, column=2, padx=6)
+        self.undo_button.grid(row=0, column=1, rowspan=2, padx=8)
+        Tooltip(self.undo_button, "Put files back where they were before an earlier tidy.")
         self.apply_button = ttk.Button(
-            footer, text="Apply selected moves", command=self.apply_plan, state="disabled"
+            footer, text="Tidy files", command=self.apply_plan, state="disabled",
+            style="Accent.TButton",
         )
-        self.apply_button.grid(row=0, column=3)
+        self.apply_button.grid(row=0, column=2, rowspan=2)
         if apply_module.list_journals():
             self.undo_button.configure(state="normal")
+        self._show_advanced(self.advanced_var.get())
+
+    def _build_header(self) -> ttk.Frame:
+        header = ttk.Frame(self)
+        header.columnconfigure(1, weight=1)
+        try:  # the app's own icon, when Pillow is there
+            from PIL import ImageTk
+
+            from organiser.icon import make_image
+
+            self._header_icon = ImageTk.PhotoImage(make_image(44))
+            ttk.Label(header, image=self._header_icon).grid(row=0, column=0, rowspan=2,
+                                                            padx=(0, 12))
+        except Exception:
+            pass
+        ttk.Label(header, text="File Organiser", style="Title.TLabel").grid(
+            row=0, column=1, sticky="w"
+        )
+        ttk.Label(
+            header, style="Muted.TLabel",
+            text="Sorts a messy folder into tidy ones. Nothing is deleted, "
+                 "and you can undo every tidy.",
+        ).grid(row=1, column=1, sticky="w")
+
+        look = ttk.Button(header, text="◐  Theme", style="Small.TButton")
+        look.configure(command=lambda: self._theme_popup(look))
+        look.grid(row=0, column=2, rowspan=2, sticky="ne")
+        return header
+
+    def _theme_popup(self, button: ttk.Button) -> None:
+        menu = tk.Menu(self, tearoff=False, **self._menu_colours())
+        for label in theme.CHOICES.values():
+            menu.add_radiobutton(label=label, variable=self.theme_var, value=label,
+                                 command=self._change_theme)
+        menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
+
+    def _build_folder_card(self) -> ttk.Frame:
+        card = ttk.Frame(self, style="Card.TFrame", padding=(16, 14))
+        card.columnconfigure(0, weight=1)
+
+        ttk.Label(card, text="Which folder needs tidying?", style="CardHeading.TLabel").grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        entry = ttk.Entry(card, textvariable=self.folder_var)
+        entry.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        entry.bind("<Return>", lambda _e: self.start_scan(show_graph=True))
+        ttk.Button(card, text="Browse…", command=self.browse).grid(
+            row=1, column=1, padx=8, pady=(8, 0)
+        )
+        self.scan_button = ttk.Button(
+            card, text="Scan folder", style="Accent.TButton",
+            command=lambda: self.start_scan(show_graph=True),
+        )
+        self.scan_button.grid(row=1, column=2, pady=(8, 0))
+        Tooltip(self.scan_button, "Looks through the folder and shows what would go where. "
+                                  "Nothing is moved yet.")
+
+        picks = ttk.Frame(card, style="CardBody.TFrame")
+        picks.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+        ttk.Label(picks, text="Quick picks:", style="CardNote.TLabel").pack(side="left")
+        for name in ("Downloads", "Desktop", "Documents", "Pictures"):
+            path = os.path.join(os.path.expanduser("~"), name)
+            if os.path.isdir(path):
+                link = ttk.Label(picks, text=name, style="CardLink.TLabel", cursor="hand2")
+                link.pack(side="left", padx=(10, 0))
+                link.bind("<Button-1>", lambda _e, p=path: self.folder_var.set(p))
+        self.advanced_link = ttk.Label(picks, style="CardLink.TLabel", cursor="hand2")
+        self.advanced_link.pack(side="right")
+        self.advanced_link.bind(
+            "<Button-1>", lambda _e: self._show_advanced(not self.advanced_var.get())
+        )
+
+        self.advanced = self._build_options(card)
+        self.advanced.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(12, 0))
+        return card
+
+    def _build_options(self, parent: ttk.Frame) -> ttk.Frame:
+        """The settings most people never need, hidden until asked for."""
+        options = ttk.Frame(parent, style="CardBody.TFrame")
+        ttk.Separator(options).grid(row=0, column=0, columnspan=6, sticky="ew", pady=(0, 10))
+
+        def label(column: int, text: str, tip: str) -> None:
+            widget = ttk.Label(options, text=text, style="Card.TLabel")
+            widget.grid(row=1, column=column, sticky="w", padx=(0 if column == 0 else 22, 8))
+            Tooltip(widget, tip)
+
+        def check(column: int, text: str, variable, tip: str) -> None:
+            widget = ttk.Checkbutton(options, text=text, variable=variable,
+                                     style="Card.TCheckbutton")
+            widget.grid(row=2, column=column, columnspan=2, sticky="w", pady=(10, 0),
+                        padx=(0 if column == 0 else 22, 0))
+            Tooltip(widget, tip)
+
+        label(0, "Include subfolders", "0 tidies only the files sitting directly in the "
+              "folder. Higher numbers also pick up files inside its subfolders, that many "
+              "levels deep. Folders this app made are always left alone.")
+        depth = ttk.Frame(options, style="CardBody.TFrame")
+        depth.grid(row=1, column=1, sticky="w")
+        ttk.Spinbox(depth, from_=0, to=4, width=3, textvariable=self.depth_var,
+                    state="readonly").pack(side="left")
+        ttk.Label(depth, text="levels deep", style="CardNote.TLabel").pack(side="left", padx=6)
+
+        label(2, "Photos and videos", "Put photos and videos into folders by the date "
+              "they were last changed, such as Pictures/2026/10.")
+        ttk.Combobox(options, textvariable=self.date_var, values=list(DATE_CHOICES.values()),
+                     state="readonly", width=18).grid(row=1, column=3, sticky="w")
+        if sys.platform == "win32":
+            label(4, "When I sign in", "Let the app tidy this folder for you each time you "
+                  "sign in to Windows, or keep watching it from the system tray.")
+            choices = [STARTUP_CHOICES["off"], STARTUP_CHOICES["auto"]]
+            if tray.available():
+                choices.append(STARTUP_CHOICES["tray"])
+            startup_box = ttk.Combobox(options, textvariable=self.startup_var, values=choices,
+                                       state="readonly", width=24)
+            startup_box.grid(row=1, column=5, sticky="w")
+            startup_box.bind("<<ComboboxSelected>>", lambda _e: self._change_startup())
+
+        check(0, "Look for duplicate files", self.duplicates_var,
+              "Compares file contents to find exact copies. Turn off to scan huge folders "
+              "faster.")
+        check(2, "Sort unknown types into 'Other'", self.other_var,
+              "Off leaves files the app doesn't recognise where they are.")
+        check(4, "Use my Windows libraries", self.libraries_var,
+              "Send photos to Pictures, videos to Videos, music to Music and documents to "
+              "Documents in your user folder, instead of folders inside the one being tidied.")
+        rules = ttk.Button(options, text="Custom rules…", command=self.edit_rules,
+                           style="Small.TButton")
+        rules.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        options.columnconfigure(5, weight=1)
+        Tooltip(rules, "Choose your own folder for any file type, for example .pdf to "
+                       "Documents/Receipts.")
+        return options
+
+    def _show_advanced(self, show: bool) -> None:
+        self.advanced_var.set(show)
+        if show:
+            self.advanced.grid()
+            self.tabs.tab(self.log_page, state="normal")
+        else:
+            self.advanced.grid_remove()
+            if self.tabs.select() == str(self.log_page):
+                self.tabs.select(self.graph_view)
+            self.tabs.tab(self.log_page, state="hidden")
+        self.advanced_link.configure(text="▾ Fewer options" if show else "▸ More options")
+
+    def _build_summary(self) -> ttk.Frame:
+        """Cards saying, at a glance, what a scan found. Click one for the details."""
+        row = ttk.Frame(self)
+        self.cards: dict[str, tuple[ttk.Label, ttk.Label]] = {}
+        specs = (
+            ("move", "Files to sort", lambda: self.tabs.select(self.graph_view)),
+            ("tidy", "Already in place", None),
+            ("duplicates", "Duplicate copies", lambda: self.tabs.select(self.duplicates_page)),
+            ("installers", "Old installers", lambda: self.tabs.select(self.installers_page)),
+        )
+        for column, (key, title, action) in enumerate(specs):
+            row.columnconfigure(column, weight=1, uniform="cards")
+            card = ttk.Frame(row, style="Card.TFrame", padding=(14, 8))
+            card.grid(row=0, column=column, sticky="ew", padx=(0 if column == 0 else 10, 0))
+            parts = (
+                ttk.Label(card, text=title, style="CardTitle.TLabel"),
+                ttk.Label(card, text="–", style="CardValue.TLabel"),
+                ttk.Label(card, text="Scan to find out", style="CardNote.TLabel"),
+            )
+            for part in parts:
+                part.pack(anchor="w")
+            self.cards[key] = (parts[1], parts[2])
+            if action:
+                for widget in (card, *parts):
+                    widget.configure(cursor="hand2")
+                    widget.bind("<Button-1>", lambda _e, a=action: a())
+                card.bind("<Enter>", lambda _e, c=card: c.configure(style="Hover.Card.TFrame"))
+                card.bind("<Leave>", lambda _e, c=card: self._unhover(c))
+        return row
+
+    @staticmethod
+    def _unhover(card: ttk.Frame) -> None:
+        # Moving onto the card's own text also "leaves" the card; ignore that.
+        under = card.winfo_containing(*card.winfo_pointerxy())
+        if under is None or not str(under).startswith(str(card)):
+            card.configure(style="Card.TFrame")
+
+    def _set_card(self, key: str, value: str, note: str) -> None:
+        value_label, note_label = self.cards[key]
+        value_label.configure(text=value)
+        note_label.configure(text=note)
 
     def _tree(self, parent: tk.Widget, columns, headings, widths):
         frame = ttk.Frame(parent)
@@ -248,9 +421,9 @@ class OrganiserApp(ttk.Frame):
         bar.grid(row=0, column=1, sticky="ns")
         tree.configure(yscrollcommand=bar.set)
         for column, heading, width in zip(columns, headings, widths):
-            tree.heading(column, text=heading)
+            tree.heading(column, text=heading, anchor="w")
             tree.column(column, width=width, anchor="w", stretch=column == columns[-1])
-        tree.heading("#0", text="File")
+        tree.heading("#0", text="File", anchor="w")
         tree.column("#0", width=380, stretch=True)
         return frame, tree
 
@@ -282,7 +455,7 @@ class OrganiserApp(ttk.Frame):
         self.plan_tree.bind("<Button-1>", self._on_plan_click)
         self.plan_tree.bind("<space>", lambda _e: self._toggle(self.plan_tree.focus()))
         self._bind_open(self.plan_tree)
-        self.plan_tree.tag_configure("bucket", font=("Segoe UI", 9, "bold"))
+        self.plan_tree.tag_configure("bucket", font=(theme.FAMILY, 10, "bold"))
         return page
 
     def _build_duplicates_tab(self) -> ttk.Frame:
@@ -319,11 +492,11 @@ class OrganiserApp(ttk.Frame):
             page,
             ("verdict", "size", "modified", "folder"),
             ("Suggestion", "Size", "Modified", "Folder"),
-            (120, 80, 145, 190),
+            (140, 80, 150, 190),
         )
         frame.grid(row=2, column=0, sticky="nsew")
         self._bind_open(self.duplicate_tree)
-        self.duplicate_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
+        self.duplicate_tree.tag_configure("group", font=(theme.FAMILY, 10, "bold"))
         return page
 
     def _build_versions_tab(self) -> ttk.Frame:
@@ -349,11 +522,11 @@ class OrganiserApp(ttk.Frame):
             page,
             ("verdict", "size", "modified", "folder"),
             ("Note", "Size", "Modified", "Folder"),
-            (120, 80, 145, 190),
+            (140, 80, 150, 190),
         )
         frame.grid(row=2, column=0, sticky="nsew")
         self._bind_open(self.version_tree)
-        self.version_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
+        self.version_tree.tag_configure("group", font=(theme.FAMILY, 10, "bold"))
         return page
 
     def _build_installers_tab(self) -> ttk.Frame:
@@ -496,11 +669,16 @@ class OrganiserApp(ttk.Frame):
             ),
             "theme": self._theme_choice(),
             "graph": self.graph_view.settings(),
+            "advanced": bool(self.advanced_var.get()),
         })
         return settings
 
     def _busy(self, busy: bool) -> None:
         self.scan_button.configure(state="disabled" if busy else "normal")
+        if busy:
+            self.progress.grid()
+        else:
+            self.progress.grid_remove()
         if busy:
             self.apply_button.configure(state="disabled")
             self.undo_button.configure(state="disabled")
@@ -512,7 +690,7 @@ class OrganiserApp(ttk.Frame):
     # -------------------------------------------------------------------- scan
 
     def start_scan(self, show_graph: bool = False) -> None:
-        """Scan the chosen folder. *show_graph* opens the Graph tab when the
+        """Scan the chosen folder. *show_graph* opens the Map tab when the
         results arrive; rescans after moving or undoing leave the tab alone."""
         folder = self.folder_var.get().strip()
         if not os.path.isdir(folder):
@@ -618,12 +796,40 @@ class OrganiserApp(ttk.Frame):
             message += " · {} duplicate set(s), {} wasted".format(
                 len(groups), human_size(wasted)
             )
-        self.status_var.set(message)
         self.log(message)
+        self._fill_cards()
+        if built.moves:
+            self.status_var.set(
+                "Untick anything you'd rather leave where it is, then press Tidy."
+            )
+        else:
+            self.status_var.set("This folder is already tidy. Nothing needs to move.")
         for path, why in built.skipped:
             self.log("  left alone ({}): {}".format(why, path))
         for path, why in built.unreadable:
             self.log("  could not read: {} - {}".format(path, why))
+
+    def _fill_cards(self) -> None:
+        built = self.plan
+        folders = len({move.bucket for move in built.moves})
+        self._set_card(
+            "move", plural(len(built.moves), "file"),
+            "into {}".format(plural(folders, "folder")) if built.moves else "Nothing to sort",
+        )
+        self._set_card("tidy", plural(len(built.already_tidy), "file"),
+                       "won't be moved")
+        copies = sum(len(group.redundant) for group in self.duplicate_groups)
+        wasted = sum(group.wasted for group in self.duplicate_groups)
+        if self.settings.get("find_duplicates", True):
+            self._set_card("duplicates", plural(copies, "copy", "copies"),
+                           "{} could be freed".format(human_size(wasted)) if copies
+                           else "None found")
+        else:
+            self._set_card("duplicates", "–", "Turned off in More options")
+        installer_size = sum(info.size for info in self.old_installers)
+        self._set_card("installers", plural(len(self.old_installers), "file"),
+                       "{} could be freed".format(human_size(installer_size))
+                       if self.old_installers else "None found")
 
     def _fill_plan_tree(self) -> None:
         tree = self.plan_tree
@@ -822,7 +1028,7 @@ class OrganiserApp(ttk.Frame):
         count = len(self.plan.selected) if self.plan else 0
         self.apply_button.configure(
             state="normal" if count else "disabled",
-            text="Apply {} move(s)".format(count) if count else "Apply selected moves",
+            text="Tidy {}".format(plural(count, "file")) if count else "Tidy files",
         )
 
     def _selected_path(self, tree: ttk.Treeview) -> str | None:
@@ -875,11 +1081,9 @@ class OrganiserApp(ttk.Frame):
 
     def _menu_colours(self) -> dict:
         palette = self.palette
-        if palette is theme.DARK:
-            return {"background": palette["surface"], "foreground": palette["text"],
-                    "activebackground": palette["select"], "activeforeground": "#ffffff",
-                    "borderwidth": 0}
-        return {}
+        return {"background": palette["surface"], "foreground": palette["text"],
+                "activebackground": palette["accent"],
+                "activeforeground": palette["accent_text"], "borderwidth": 0}
 
     def _reveal_plan_selection(self) -> None:
         path = self._selected_path(self.plan_tree)
@@ -963,9 +1167,10 @@ class OrganiserApp(ttk.Frame):
         if len(buckets) > 12:
             preview += "\n  • …and {} more".format(len(buckets) - 12)
         if not messagebox.askokcancel(
-            "Apply moves",
-            "Move {} file(s) into:\n\n{}\n\n"
-            "Nothing is deleted, and this run can be undone.".format(len(moves), preview),
+            "Tidy files",
+            "Move {} into:\n\n{}\n\n"
+            "Nothing is deleted, and you can undo this with Undo a tidy….".format(
+                plural(len(moves), "file"), preview),
         ):
             return
         self._busy(True)
@@ -1193,8 +1398,8 @@ def main() -> None:
     _sharpen_on_high_dpi()
     root = tk.Tk()
     root.title("File Organiser")
-    root.geometry("1040x700")
-    root.minsize(860, 560)
+    root.geometry("1180x840")
+    root.minsize(940, 680)
     try:  # the app's own icon instead of Tk's feather, when Pillow is there
         from PIL import ImageTk
 

@@ -178,7 +178,10 @@ class GraphView(ttk.Frame):
                  "to fold it · right-click for more",
         )
         self.empty = self.canvas.create_text(0, 0, font=("Segoe UI", 11),
-                                             text="Scan a folder to see its graph.")
+                                             text="Choose a folder above and press Scan folder."
+                                                  "\n\nYou'll see a map of where every file "
+                                                  "would go. Nothing moves until you press Tidy.",
+                                             justify="center")
         self.set_theme(mode)
 
         self.canvas.bind("<Configure>", self._on_resize)

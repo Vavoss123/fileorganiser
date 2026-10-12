@@ -69,10 +69,11 @@ run one Windows may show "Windows protected your PC". Click **More info**, then
 ## Quick start
 
 1. Open File Organiser. It starts with your Downloads folder selected.
-2. Press **Scan**. Nothing is changed yet.
-3. Look through the **Plan** tab. Untick anything you want to leave alone.
-4. Press **Apply**. The files are moved.
-5. Changed your mind? Press **Undo…** and pick the run.
+2. Press **Scan folder**. Nothing is changed yet.
+3. Look at the map, or the **Files to move** list. Untick anything you want to
+   leave alone.
+4. Press **Tidy**. The files are moved.
+5. Changed your mind? Press **Undo a tidy…** and pick the run.
 
 To try it without touching your own files, create a demo folder:
 
@@ -82,35 +83,45 @@ python scripts\make_demo_folder.py
 
 This creates about 40 messy files in `%TEMP%\fileorganiser-demo`, including
 duplicates, versions of the same essay, an unfinished download and old
-installers. Point the app at that folder and press **Scan**.
+installers. Point the app at that folder and press **Scan folder**.
 
 ## Using the app
 
 ### Choosing a folder
 
-Type a path or press **Browse…**, then press **Scan** (or Enter). The app
+Type a path, press **Browse…**, or click one of the quick picks (Downloads,
+Desktop, Documents, Pictures). Then press **Scan folder** (or Enter). The app
 remembers the folder and all options for next time.
 
-### Options
+After a scan, four cards sum up what it found: files to sort, files already in
+place, duplicate copies and old installers. Click a card to see the details.
+
+**◐ Theme** in the top corner switches between light, dark, and the same as
+Windows.
+
+### More options
+
+Most people never need these, so they stay hidden until you click **More
+options**. Rest the mouse on any of them for an explanation. Opening them also
+shows the **Activity** tab. The app remembers whether they're open.
 
 | Option | What it does |
 | --- | --- |
-| Look into subfolders | How many levels of subfolders to include. 0 means only the files directly in the folder. Folders the app created itself are always skipped. |
-| Send photos, videos and documents to my user libraries | Moves pictures to `~\Pictures`, videos to `~\Videos`, audio to `~\Music` and documents to `~\Documents` instead of subfolders of the scanned folder. Everything else stays in the scanned folder. |
-| Put unrecognised files in 'Other' | Off leaves files with unknown extensions where they are. |
-| Look for duplicates | Compares file contents. Turn off to make scans of huge folders faster. |
-| Date folders for photos and videos | Off, by year (`Pictures/2026`) or by year and month (`Pictures/2026/10`). Uses the date each file was last modified. |
+| Include subfolders | How many levels of subfolders to include. 0 means only the files directly in the folder. Folders the app created itself are always skipped. |
+| Photos and videos | Off, by year (`Pictures/2026`) or by year and month (`Pictures/2026/10`). Uses the date each file was last modified. |
 | When I sign in | Do nothing, tidy once, or keep tidying from the tray. See [Automatic tidying](#automatic-tidying). |
+| Look for duplicate files | Compares file contents. Turn off to make scans of huge folders faster. |
+| Sort unknown types into 'Other' | Off leaves files with unknown extensions where they are. |
+| Use my Windows libraries | Moves pictures to `~\Pictures`, videos to `~\Videos`, audio to `~\Music` and documents to `~\Documents` instead of subfolders of the scanned folder. Everything else stays in the scanned folder. |
 | Custom rules… | Choose your own folder for any file type. See below. |
-| Theme | Light, dark, or the same as Windows. The Graph tab follows it too. |
 
-### Plan tab
+### Files to move tab
 
 Lists every file that will move, grouped by destination folder. Click the tick
 in the **Move** column (or press Space) to include or exclude a file. Unticking
 a group heading unticks everything in it.
 
-In this tab and the Duplicates, Possible versions and Old installers tabs,
+In this tab and the Duplicates, Similar names and Old installers tabs,
 double-click a file (or press Enter) to open it in its usual program.
 Right-click a file for **Open**, **Show in Explorer** and **Open containing
 folder**.
@@ -119,7 +130,7 @@ If a file with the same name already exists at the destination, the incoming
 file is renamed to `name (2).ext`. The new name is shown in the plan. Existing
 files are never overwritten.
 
-### Graph tab
+### Map tab
 
 The same plan drawn as a map, in the style of Obsidian's graph view. The
 folder being tidied sits in the middle, each destination folder branches off
@@ -135,7 +146,7 @@ scan finds something to move.
 - Hover a dot to light up what it is linked to. Click it to see its details.
 - Double-click a file to open it in its usual program.
 - Right-click a file for **Open**, **Show in Explorer**, and **Skip** or
-  **Include**. Skipping also unticks it in the Plan tab, and skipped files are
+  **Include**. Skipping also unticks it in the Files to move tab, and skipped files are
   drawn hollow. Right-click a folder to open it in Explorer (once it exists)
   or to fold it.
 - Double-click a folder to fold its files away into it, and again to unfold
@@ -174,7 +185,7 @@ are marked **safe to delete**.
 To keep scans fast, files are compared by size first, then by the first 64 KB,
 and only read in full when those match.
 
-### Possible versions tab
+### Similar names tab
 
 Files whose names look like versions of the same thing but whose contents
 differ, for example `essay.docx`, `essay (1).docx` and `essay_final.docx`. The
@@ -188,14 +199,14 @@ Installers (`.exe`, `.msi`, `.msix` and similar) that haven't been modified for
 30 days or more. It also looks inside the `Installers` folder from previous
 runs. **Send all to Recycle Bin** clears them out.
 
-### Log tab
+### Activity tab
 
-Everything the app did in this session: every move, anything it skipped and
+Shown when **More options** is open. Everything the app did in this session: every move, anything it skipped and
 why, and anything it couldn't read.
 
 ### Undo
 
-**Undo…** lists every run that can still be undone, newest first. Pick one
+**Undo a tidy…** lists every run that can still be undone, newest first. Pick one
 and the files go back where they came from. Any folders the run created are
 removed if they're now empty. Files you've moved or renamed since then are
 left where they are, and the log says so.
@@ -257,7 +268,7 @@ Things to know:
 - Automatic runs use the options you last saved in the app, including custom
   rules and date folders.
 - They only move files. They never send anything to the Recycle Bin.
-- Each automatic run appears under **Undo…** like any other.
+- Each automatic run appears under **Undo a tidy…** like any other.
 - What they did is written to `%LOCALAPPDATA%\FileOrganiser\auto.log`.
 - The setting is a normal Windows startup entry, so you can also turn it off in
   Task Manager under **Startup apps**.
@@ -283,7 +294,7 @@ Everything is stored in `%LOCALAPPDATA%\FileOrganiser\`:
 
 | Path | Contents |
 | --- | --- |
-| `settings.json` | Your folder, options, theme and Graph tab settings. |
+| `settings.json` | Your folder, options, theme and map settings. |
 | `journal\*.jsonl` | One undo record per run. Undone runs are renamed to `.undone`. Older versions used `.json`; these can still be undone. |
 | `auto.log` | Log of automatic and tray runs. Starts afresh after 1 MB, keeping one `auto.log.old`. |
 
@@ -381,7 +392,7 @@ organiser/
   apply.py                   moving files, undo records, undo
   duplicates.py              finding duplicates and possible versions
   graph.py                   the plan as a graph, and its force layout
-  graphview.py               the Graph tab: drawing and interaction
+  graphview.py               the Map tab: drawing and interaction
   theme.py                   the light and dark looks
   cleanup.py                 Recycle Bin clear-outs, old installers
   recycle.py                 the Windows Recycle Bin call
@@ -400,12 +411,12 @@ run.bat                      opens the app from source without a console
 
 ## Troubleshooting
 
-**A file wasn't moved.** Check the Log tab. Common reasons: it was changed in
+**A file wasn't moved.** Check the Activity tab (under **More options**). Common reasons: it was changed in
 the last 2 minutes, it's an unfinished download, it's open in another program,
 or it's already in the right folder.
 
 **Undo skipped some files.** Files that were moved, renamed or deleted after
-the run are left alone so nothing gets overwritten. The Log tab lists them.
+the run are left alone so nothing gets overwritten. The Activity tab lists them.
 
 **The tray icon doesn't appear.** Windows sometimes hides new tray icons. Click
 the `^` arrow next to the clock, or turn the icon on in Settings >

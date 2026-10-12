@@ -18,7 +18,8 @@ DEFAULTS: dict = {
     "date_folders": "off",    # "off", "year" or "month" for photos and videos
     "installer_age_days": 30, # installers older than this are offered for the bin
     "theme": "system",        # "system", "light" or "dark"
-    "graph": {},              # the Graph tab's panel settings
+    "graph": {},              # the Map tab's panel settings
+    "advanced": False,        # show "More options"
 }
 
 
