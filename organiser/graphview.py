@@ -94,13 +94,14 @@ class GraphView(ttk.Frame):
         on_open: Callable[[str], None] | None = None,
         settings: dict | None = None,
         mode: str = "dark",
+        accent: str | None = None,
     ) -> None:
         super().__init__(master)
         self.on_toggle = on_toggle
         self.on_reveal = on_reveal
         self.on_open = on_open
         self.mode = mode
-        self.c = PALETTES[mode]
+        self.c = dict(PALETTES[mode], **({"accent": accent} if accent else {}))
         self.plan = None
         self.duplicate_groups = []
         self.collapsed: set[str] | None = None  # None until the first build picks some
@@ -184,7 +185,7 @@ class GraphView(ttk.Frame):
                                                   "\n\nYou'll see a map of where every file "
                                                   "would go. Nothing moves until you press Tidy.",
                                              justify="center")
-        self.set_theme(mode)
+        self.set_theme(mode, accent)
 
         self.canvas.bind("<Configure>", self._on_resize)
         self.canvas.bind("<Motion>", self._on_motion)
@@ -217,9 +218,10 @@ class GraphView(ttk.Frame):
             "size_by": self.size_by_var.get(), "panel": self.panel_wanted,
         }
 
-    def set_theme(self, mode: str) -> None:
+    def set_theme(self, mode: str, accent: str | None = None) -> None:
+        """Recolour for *mode*, with *accent* (a colour) in place of the default."""
         self.mode = mode
-        self.c = c = PALETTES[mode]
+        self.c = c = dict(PALETTES[mode], **({"accent": accent} if accent else {}))
         self.canvas.configure(background=c["bg"])
         for button in (self.play_button, self.gear_button):
             button.configure(background=c["button"], foreground=c["text"],

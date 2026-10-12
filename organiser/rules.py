@@ -2,8 +2,8 @@
 
 Two kinds of rule:
 
-* ``TYPE_RULES`` - generic media/document buckets (Pictures, Videos, ...).
-* ``APP_RULES``  - project files that only one application opens. These go
+* ``TYPE_RULES``, generic media/document buckets (Pictures, Videos, ...).
+* ``APP_RULES``, project files that only one application opens. These go
   under ``Apps/<Application>`` so a stray ``.blend`` lands next to its
   siblings instead of in a generic "3D" pile.
 

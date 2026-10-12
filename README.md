@@ -1,6 +1,7 @@
 # File Organiser
 
-A Windows desktop app that tidies a cluttered folder, usually Downloads.
+A desktop app for Windows and Mac that tidies a cluttered folder, usually
+Downloads.
 
 It sorts files into folders by type (pictures, videos, documents and so on),
 gives project files from specific programs their own folder (`Apps/Blender`,
@@ -45,19 +46,45 @@ nothing is ever permanently deleted.
 
 ## Installing
 
-There are three ways to run it.
+Download it from the
+[Releases page](https://github.com/Vavoss123/fileorganiser/releases/latest),
+under **Assets**. Everything there is built automatically from this repository
+by GitHub Actions.
 
-| Option | What you need | Best for |
+| Download | For | Notes |
 | --- | --- | --- |
-| `FileOrganiserSetup.exe` | Nothing | Normal use. Adds a Start Menu shortcut and an uninstall entry. |
-| `FileOrganiser.exe` | Nothing | Running without installing, e.g. from a USB stick. |
-| `python app.py` | Python 3.10+ | Development. |
+| `FileOrganiserSetup.exe` | Windows | Normal use. Adds a Start Menu shortcut and an uninstall entry. |
+| `FileOrganiser.exe` | Windows | Runs without installing, e.g. from a USB stick. |
+| `FileOrganiser-mac.dmg` | Mac with Apple silicon (M1 or newer) | Open it and drag File Organiser into Applications. |
+| `python app.py` | Either, with Python 3.10+ | Development. |
 
-Download either `.exe` from the
-[Releases page](https://github.com/Vavoss123/fileorganiser/releases/latest).
-They are built automatically from this repository by GitHub Actions. You can
-also build them yourself with `build.bat` (see
+You can also build them yourself (see
 [Building from source](#building-from-source)).
+
+### On a Mac
+
+The app isn't signed with an Apple developer certificate, so the first time
+you open it macOS says it can't check it for malicious software. To open it
+anyway:
+
+1. Open File Organiser once and press **Done** on the warning.
+2. Go to **System Settings → Privacy & Security**, scroll down, and press
+   **Open Anyway** next to "File Organiser was blocked".
+3. Confirm with your password. From then on it opens normally.
+
+The first time you send duplicates or old installers to the Trash, macOS asks
+whether File Organiser may control Finder; say **OK**. The app asks Finder to
+do it so that **Put Back** works as usual.
+
+Macs with an Intel processor (from before late 2020) aren't supported by the
+download; run it from source instead.
+
+What differs on a Mac: "When I sign in" offers **Tidy once** only (no tray
+watcher), **Use my Mac folders** sends videos to `Movies`, `.dmg` and `.pkg`
+files count as old installers, shortcuts use ⌘ instead of Ctrl, and settings
+live in `~/Library/Application Support/FileOrganiser`.
+
+### On Windows
 
 The installer installs for your user account only, so it doesn't ask for
 administrator rights. It goes to `%LOCALAPPDATA%\Programs\File Organiser`.
@@ -378,10 +405,22 @@ Close the app before building, otherwise Windows won't let the old exe be
 replaced. The installer version number is set at the top of `installer.iss`,
 or by the `APP_VERSION` environment variable if it is set.
 
+### Building the Mac app
+
+On a Mac with Python 3.10 or newer (from python.org, so Tk is included):
+
+```
+sh build_mac.sh
+```
+
+This makes `dist/File Organiser.app` and `dist/FileOrganiser-mac.dmg`.
+
 ### Publishing a release
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds both
-`.exe` files on GitHub's Windows machines and attaches them to a release. To
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the
+Windows `.exe` files and the Mac `.dmg` on GitHub's machines, opens each built
+app once to check it works (`--smoke-test`), and attaches them to a release.
+Every push runs these builds and checks; only a version tag publishes. To
 publish version 1.4:
 
 1. Set `__version__ = "1.4"` in [`organiser/__init__.py`](organiser/__init__.py)
@@ -424,16 +463,18 @@ organiser/
   graphview.py               the Map tab: drawing and interaction
   theme.py                   the light and dark looks, tick boxes included
   updates.py                 asking GitHub for a newer release
+  system.py                  the differences between Windows and macOS
   cleanup.py                 Recycle Bin clear-outs, old installers
-  recycle.py                 the Windows Recycle Bin call
+  recycle.py                 the Recycle Bin (Windows) and Trash (Mac)
   auto.py                    scan and plan in one step, the --auto run
-  startup.py                 the "When I sign in" startup entry
+  startup.py                 the "When I sign in" startup entry or Login Item
   tray.py                    the tray icon
   icon.py                    draws the app icon
   config.py                  settings file and data folder
 scripts/make_demo_folder.py  creates a messy folder to try the app on
 tests/test_organiser.py      tests
-build.bat                    builds the exe and installer
+build.bat                    builds the Windows exe and installer
+build_mac.sh                 builds the Mac app and disk image
 installer.iss                Inno Setup installer script
 .github/workflows/release.yml builds and publishes releases on GitHub
 run.bat                      opens the app from source without a console

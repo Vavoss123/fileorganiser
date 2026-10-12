@@ -1,7 +1,7 @@
 """A tray icon that keeps the folder tidy while it runs.
 
-Every minute it does what the automatic run does - scan with the saved
-settings and move what the plan says - so new downloads are filed once they
+Every minute it does what the automatic run does, scanning with the saved
+settings and moving what the plan says, so new downloads are filed once they
 have settled. Like every run it only moves files and can be undone.
 
 Needs ``pystray`` and Pillow; :func:`available` says whether they are there.

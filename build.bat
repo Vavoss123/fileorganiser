@@ -24,7 +24,7 @@ if defined ISCC (
     )
     echo Installer: dist\FileOrganiserSetup.exe
 ) else (
-    echo Inno Setup not found - skipped the installer. dist\FileOrganiser.exe is ready.
+    echo Inno Setup not found, skipped the installer. dist\FileOrganiser.exe is ready.
 )
 popd
 exit /b 0

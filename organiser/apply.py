@@ -1,7 +1,7 @@
 """Carrying out an approved plan, and reversing it.
 
 Every applied run keeps a journal, written line by line as files move, so a
-run can be undone even if the app is closed - or crashes - in between. Files are only ever *moved* - nothing in
+run can be undone even if the app is closed, or crashes, in between. Files are only ever *moved*, nothing in
 this project deletes user data.
 """
 

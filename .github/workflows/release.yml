@@ -96,7 +96,14 @@ jobs:
           if [ "${GITHUB_REF#refs/tags/v}" != "$GITHUB_REF" ]; then
             export APP_VERSION="${GITHUB_REF#refs/tags/v}"
           fi
-          sh build_mac.sh
+          set +e
+          sh build_mac.sh > build.log 2>&1
+          code=$?
+          cat build.log
+          if [ $code -ne 0 ]; then
+            echo "::error::Mac build failed (exit $code): $(tail -c 1500 build.log | tr '\n' ' ')"
+            exit 1
+          fi
 
       - name: Check the built app opens
         run: |

@@ -1,4 +1,4 @@
-"""Sending files to the Recycle Bin (Windows) or the Trash (macOS) -
+"""Sending files to the Recycle Bin (Windows) or the Trash (macOS),
 recoverable, never a hard delete."""
 
 from __future__ import annotations

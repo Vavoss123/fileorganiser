@@ -19,13 +19,23 @@ rm -rf "$APP"
     app.py
 
 # PyInstaller writes version 0.0.0 and no reason for the Finder prompt.
-PLIST="$APP/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$PLIST"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :NSAppleEventsUsageDescription string \
-File Organiser asks Finder to move the duplicates and old installers you pick to the Trash, \
-so you can put them back if you change your mind." "$PLIST"
-/usr/libexec/PlistBuddy -c "Add :LSApplicationCategoryType string public.app-category.utilities" "$PLIST"
+"$PYTHON" - "$APP/Contents/Info.plist" "$VERSION" <<'EOF'
+import plistlib, sys
+path, version = sys.argv[1], sys.argv[2]
+with open(path, "rb") as handle:
+    info = plistlib.load(handle)
+info.update({
+    "CFBundleShortVersionString": version,
+    "CFBundleVersion": version,
+    "CFBundleDisplayName": "File Organiser",
+    "LSApplicationCategoryType": "public.app-category.utilities",
+    "NSAppleEventsUsageDescription": "File Organiser asks Finder to move the duplicates "
+        "and old installers you pick to the Trash, so you can put them back if you "
+        "change your mind.",
+})
+with open(path, "wb") as handle:
+    plistlib.dump(info, handle)
+EOF
 # Editing Info.plist breaks PyInstaller's signature; Apple silicon Macs refuse
 # to run an app with a broken one, so sign it again (ad hoc: no certificate).
 codesign --force --deep --sign - "$APP"

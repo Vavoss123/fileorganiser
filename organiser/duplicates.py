@@ -2,10 +2,10 @@
 
 Two separate signals, deliberately kept apart:
 
-* **Exact duplicates** - byte-identical content, proven by SHA-256. Safe to
+* **Exact duplicates**, byte-identical content, proven by SHA-256. Safe to
   act on, and this is what catches ``victor cv 1.pdf`` vs
   ``victor stokoe cv.pdf``: the names differ, the bytes do not.
-* **Possible versions** - names that normalise to the same thing but whose
+* **Possible versions**, names that normalise to the same thing but whose
   content differs. A hint for a human, never more than that.
 """
 
@@ -132,7 +132,7 @@ def find_duplicates(
 ) -> list[DuplicateGroup]:
     """Group byte-identical files, cheapest test first.
 
-    Size, then a hash of the first 64 KiB, then the full hash - so most files
+    Size, then a hash of the first 64 KiB, then the full hash, so most files
     are never read in full.
     """
     by_size: dict[int, list[FileInfo]] = defaultdict(list)
@@ -188,7 +188,7 @@ def find_possible_versions(
     duplicate_groups: list[DuplicateGroup] | None = None,
     min_stem_length: int = 4,
 ) -> list[VersionGroup]:
-    """Same-ish name, different content - probably successive versions."""
+    """Same-ish name, different content, probably successive versions."""
     already = set()
     for group in duplicate_groups or []:
         already.update(f.path for f in group.files)

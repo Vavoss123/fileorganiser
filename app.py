@@ -1,4 +1,4 @@
-"""File Organiser - a small Windows and macOS app for tidying a cluttered folder.
+"""File Organiser, a small Windows and macOS app for tidying a cluttered folder.
 
 The app always shows you a plan first. Scanning and hashing never change
 anything on disk; files move only when you press "Tidy", and
@@ -140,7 +140,7 @@ def open_path(path: str, parent: tk.Misc | None = None) -> None:
         return
     try:
         if sys.platform == "win32":
-            os.startfile(path)  # noqa: S606 - opening the user's own file is the point
+            os.startfile(path)  # noqa: S606, opening the user's own file is the point
         elif sys.platform == "darwin":
             subprocess.Popen(["open", path])
         else:
@@ -184,7 +184,13 @@ class OrganiserApp(ttk.Frame):
         self.show_graph_after_scan = False
         self.cancel_scan_event = threading.Event()
         self.updates_var = tk.BooleanVar(value=bool(self.settings.get("check_updates", True)))
-        self.palette = theme.apply(master, theme.resolve(self.settings.get("theme", "system")))
+        accent = self.settings.get("accent")
+        self.accent_var = tk.StringVar(
+            value=accent if accent in theme.ACCENTS else theme.DEFAULT_ACCENT
+        )
+        self.welcome: WelcomeDialog | None = None
+        self.palette = theme.apply(master, theme.resolve(self.settings.get("theme", "system")),
+                                   self.accent_var.get())
 
         self.pack(fill="both", expand=True)
         self._build()
@@ -212,6 +218,7 @@ class OrganiserApp(ttk.Frame):
             on_open=lambda path: open_path(path, self),
             settings=self.settings.get("graph"),
             mode=theme.resolve(self.settings.get("theme", "system")),
+            accent=self.palette["accent"],
         )
         self.tabs.add(self.graph_view, text="Map")
         self.plan_page = self._build_plan_tab()
@@ -296,8 +303,11 @@ class OrganiserApp(ttk.Frame):
                                   "{}.".format(updates.__version__))
 
     def show_welcome(self) -> None:
-        dialog = WelcomeDialog(self.master, self.palette)
-        self.master.wait_window(dialog)
+        if self.welcome is not None:
+            return
+        self.welcome = WelcomeDialog(self.master, self)
+        self.master.wait_window(self.welcome)
+        self.welcome = None
         if not self.settings.get("welcomed"):
             self.settings["welcomed"] = True
             config.save(self.current_settings())
@@ -317,6 +327,11 @@ class OrganiserApp(ttk.Frame):
         menu = tk.Menu(self, tearoff=False, **self._menu_colours())
         for label in theme.CHOICES.values():
             menu.add_radiobutton(label=label, variable=self.theme_var, value=label,
+                                 command=self._change_theme)
+        menu.add_separator()
+        for name in theme.ACCENTS:
+            menu.add_radiobutton(label=" " + name, variable=self.accent_var, value=name,
+                                 image=self.swatch(name), compound="left",
                                  command=self._change_theme)
         menu.tk_popup(button.winfo_rootx(), button.winfo_rooty() + button.winfo_height())
 
@@ -665,11 +680,26 @@ class OrganiserApp(ttk.Frame):
         return next((k for k, v in theme.CHOICES.items() if v == self.theme_var.get()), "system")
 
     def _change_theme(self) -> None:
+        """Apply the chosen theme and accent colour everywhere, and remember them."""
         mode = theme.resolve(self._theme_choice())
-        self.palette = theme.apply(self.master, mode)
+        self.palette = theme.apply(self.master, mode, self.accent_var.get())
         self._colour_plain_widgets()
-        self.graph_view.set_theme(mode)
+        self.graph_view.set_theme(mode, self.palette["accent"])
+        if self.welcome is not None:
+            self.welcome.recolour(self.palette)
         config.save(self.current_settings())
+
+    def swatch(self, name: str) -> tk.PhotoImage:
+        """A small square of accent colour *name*, for menus."""
+        if not hasattr(self, "_swatches"):
+            self._swatches: dict[str, tk.PhotoImage] = {}
+        key = name + self.palette["bg"]
+        if key not in self._swatches:
+            colour = theme.palette(theme.resolve(self._theme_choice()), name)["accent"]
+            image = tk.PhotoImage(master=self, width=14, height=14)
+            image.put(colour, to=(0, 0, 14, 14))
+            self._swatches[key] = image
+        return self._swatches[key]
 
     def _colour_plain_widgets(self) -> None:
         """Colour the few plain Tk widgets that ttk styles cannot reach."""
@@ -737,6 +767,7 @@ class OrganiserApp(ttk.Frame):
                 (k for k, v in DATE_CHOICES.items() if v == self.date_var.get()), "off"
             ),
             "theme": self._theme_choice(),
+            "accent": self.accent_var.get(),
             "graph": self.graph_view.settings(),
             "advanced": bool(self.advanced_var.get()),
             "check_updates": bool(self.updates_var.get()),
@@ -1347,12 +1378,16 @@ class WelcomeDialog(tk.Toplevel):
          "them all back."),
     )
 
-    def __init__(self, master: tk.Misc, palette: dict) -> None:
+    def __init__(self, master: tk.Misc, app: "OrganiserApp") -> None:
         super().__init__(master)
+        self.app = app
+        palette = app.palette
         self.title("Welcome to File Organiser")
         self.transient(master)
         self.resizable(False, False)
         self.configure(background=palette["bg"])
+        self.badges: list[tuple[tk.Canvas, int, int]] = []
+        self.swatches: dict[str, tuple[tk.Canvas, int, int]] = {}
 
         page = ttk.Frame(self, padding=24)
         page.pack(fill="both", expand=True)
@@ -1367,18 +1402,21 @@ class WelcomeDialog(tk.Toplevel):
             card.pack(fill="x", pady=(0, 10))
             badge = tk.Canvas(card, width=34, height=34, highlightthickness=0,
                               background=palette["surface"])
-            badge.create_oval(2, 2, 32, 32, fill=palette["accent"], outline="")
-            badge.create_text(17, 17, text=str(number), fill=palette["accent_text"],
-                              font=(theme.FAMILY, 12, "bold"))
+            circle = badge.create_oval(2, 2, 32, 32, fill=palette["accent"], outline="")
+            digit = badge.create_text(17, 17, text=str(number), fill=palette["accent_text"],
+                                      font=(theme.FAMILY, 12, "bold"))
             badge.pack(side="left", padx=(0, 14), anchor="n")
+            self.badges.append((badge, circle, digit))
             words = ttk.Frame(card, style="CardBody.TFrame")
             words.pack(side="left", fill="x", expand=True)
             ttk.Label(words, text=title, style="CardHeading.TLabel").pack(anchor="w")
             ttk.Label(words, text=text, style="Card.TLabel", wraplength=420,
                       justify="left").pack(anchor="w", pady=(2, 0))
 
+        self._build_look(page)
+
         keys = ttk.Frame(page)
-        keys.pack(fill="x", pady=(6, 0))
+        keys.pack(fill="x", pady=(14, 0))
         ttk.Label(keys, text="Keyboard shortcuts", style="Muted.TLabel").grid(
             row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
         for index, (combo, what) in enumerate(SHORTCUTS):
@@ -1399,6 +1437,55 @@ class WelcomeDialog(tk.Toplevel):
         y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
         self.geometry("+{}+{}".format(max(x, 0), max(y, 0)))
         self.grab_set()
+
+    def _build_look(self, page: ttk.Frame) -> None:
+        """Make it yours: light or dark, and an accent colour. Changes show at once."""
+        look = ttk.Frame(page)
+        look.pack(fill="x", pady=(6, 0))
+        ttk.Label(look, text="Make it yours", font=(theme.FAMILY, 11, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        ttk.Label(look, text="Look").grid(row=1, column=0, sticky="w", padx=(0, 14))
+        modes = ttk.Frame(look)
+        modes.grid(row=1, column=1, sticky="w")
+        for label in theme.CHOICES.values():
+            ttk.Radiobutton(modes, text=label, value=label, variable=self.app.theme_var,
+                            command=self.app._change_theme).pack(side="left", padx=(0, 14))
+        ttk.Label(look, text="Colour").grid(row=2, column=0, sticky="w", padx=(0, 14),
+                                            pady=(8, 0))
+        colours = ttk.Frame(look)
+        colours.grid(row=2, column=1, sticky="w", pady=(8, 0))
+        for name in theme.ACCENTS:
+            dot = tk.Canvas(colours, width=30, height=30, highlightthickness=0,
+                            cursor="hand2")
+            ring = dot.create_oval(2, 2, 28, 28, outline="", width=2)
+            fill = dot.create_oval(6, 6, 24, 24, outline="")
+            dot.pack(side="left", padx=(0, 6))
+            dot.bind("<Button-1>", lambda _e, n=name: self._pick(n))
+            Tooltip(dot, name)
+            self.swatches[name] = (dot, ring, fill)
+        self._paint_swatches(self.app.palette)
+
+    def _pick(self, name: str) -> None:
+        self.app.accent_var.set(name)
+        self.app._change_theme()
+
+    def _paint_swatches(self, palette: dict) -> None:
+        mode = theme.resolve(self.app._theme_choice())
+        for name, (dot, ring, fill) in self.swatches.items():
+            colour = theme.palette(mode, name)["accent"]
+            dot.configure(background=palette["bg"])
+            dot.itemconfigure(fill, fill=colour)
+            chosen = name == self.app.accent_var.get()
+            dot.itemconfigure(ring, outline=colour if chosen else "")
+
+    def recolour(self, palette: dict) -> None:
+        """Follow a theme or colour change made while the dialog is open."""
+        self.configure(background=palette["bg"])
+        for badge, circle, digit in self.badges:
+            badge.configure(background=palette["surface"])
+            badge.itemconfigure(circle, fill=palette["accent"])
+            badge.itemconfigure(digit, fill=palette["accent_text"])
+        self._paint_swatches(palette)
 
 
 class HistoryDialog(tk.Toplevel):

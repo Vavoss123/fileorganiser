@@ -56,7 +56,7 @@ def recycle_duplicates(
 
 
 def old_installers(files: list[FileInfo], days: float = 30, now: float | None = None) -> list[FileInfo]:
-    """Setup files not touched for *days* - usually already installed, or never will be.
+    """Setup files not touched for *days*, usually already installed, or never will be.
 
     Goes by extension, not by where the file sits, so the built-in rule is
     used even if the user sends ``.exe`` somewhere of their own.

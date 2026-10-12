@@ -55,6 +55,36 @@ DARK = {
     "good": "#3fb950",
     "bad": "#f85149",
 }
+#: Accent colours to choose from: name -> (light, light hover, dark, dark hover).
+#: Each pair is picked to keep white text readable on it.
+ACCENTS = {
+    "Purple": ("#6c5ce7", "#5a4bd6", "#7c6cf2", "#8f81ff"),
+    "Blue": ("#2f6fed", "#2459c9", "#4c8dff", "#6aa1ff"),
+    "Teal": ("#0e8c7e", "#0b7267", "#1aa898", "#33bfae"),
+    "Green": ("#2f9348", "#26783b", "#3aa85a", "#55bd74"),
+    "Orange": ("#d9620b", "#bb5306", "#e57a1f", "#f0913f"),
+    "Pink": ("#d1307e", "#b4266b", "#e04f94", "#ea6fab"),
+}
+DEFAULT_ACCENT = "Purple"
+
+
+def _mix(colour: str, other: str, amount: float) -> str:
+    a = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(other[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join("{:02x}".format(round(x + (y - x) * amount)) for x, y in zip(a, b))
+
+
+def palette(mode: str, accent: str = DEFAULT_ACCENT) -> dict:
+    """The colours for *mode* ("light" or "dark") with the chosen *accent*."""
+    c = dict(DARK if mode == "dark" else LIGHT)
+    light, light_hover, dark, dark_hover = ACCENTS.get(accent, ACCENTS[DEFAULT_ACCENT])
+    if mode == "dark":
+        c.update(accent=dark, accent_hover=dark_hover, select=_mix(dark, c["bg"], 0.55))
+    else:
+        c.update(accent=light, accent_hover=light_hover, select=_mix(light, "#ffffff", 0.85))
+    return c
+
+
 FAMILY = {"win32": "Segoe UI", "darwin": "Helvetica Neue"}.get(sys.platform, "DejaVu Sans")
 
 
@@ -105,13 +135,13 @@ def _fonts(root: tk.Misc) -> None:
             pass
 
 
-def apply(root: tk.Tk, mode: str) -> dict:
+def apply(root: tk.Tk, mode: str, accent: str = DEFAULT_ACCENT) -> dict:
     """Restyle every ttk widget for *mode* ("light" or "dark").
 
     Returns the palette, for the few plain Tk widgets that need colouring by
     hand (the log, menus).
     """
-    c = DARK if mode == "dark" else LIGHT
+    c = palette(mode, accent)
     _fonts(root)
     style = ttk.Style(root)
     style.theme_use("clam")
@@ -306,7 +336,7 @@ def _indicator_images(root: tk.Misc, c: dict, kind: str) -> dict[str, object] | 
 
 def _indicators(root: tk.Misc, style: ttk.Style, c: dict, mode: str) -> None:
     for widget, kind in (("Checkbutton", "check"), ("Radiobutton", "radio")):
-        name = "organiser.{}.{}".format(kind, mode)
+        name = "organiser.{}.{}.{}".format(kind, mode, c["accent"].lstrip("#"))
         if name not in _images:
             images = _indicator_images(root, c, kind)
             if images is None:
