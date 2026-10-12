@@ -17,7 +17,11 @@ import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
 
-CHOICES = {"system": "Same as Windows", "light": "Light", "dark": "Dark"}
+CHOICES = {
+    "system": "Same as my Mac" if sys.platform == "darwin" else "Same as Windows",
+    "light": "Light",
+    "dark": "Dark",
+}
 
 LIGHT = {
     "bg": "#f4f5f7",
@@ -51,11 +55,20 @@ DARK = {
     "good": "#3fb950",
     "bad": "#f85149",
 }
-FAMILY = "Segoe UI" if sys.platform == "win32" else "TkDefaultFont"
+FAMILY = {"win32": "Segoe UI", "darwin": "Helvetica Neue"}.get(sys.platform, "DejaVu Sans")
 
 
 def system_prefers_dark() -> bool:
-    """True when Windows is set to dark mode for apps."""
+    """True when Windows (for apps) or macOS is set to dark mode."""
+    if sys.platform == "darwin":
+        import subprocess
+
+        try:
+            found = subprocess.run(["defaults", "read", "-g", "AppleInterfaceStyle"],
+                                   capture_output=True, text=True, timeout=3)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return found.stdout.strip().lower() == "dark"
     if sys.platform != "win32":
         return False
     try:
@@ -77,7 +90,12 @@ def resolve(choice: str) -> str:
     return "dark" if system_prefers_dark() else "light"
 
 
-def _fonts() -> None:
+def _fonts(root: tk.Misc) -> None:
+    if sys.platform == "darwin":
+        # Tk on a Mac counts 72 dots to the inch, so 10-point text comes out
+        # smaller than on Windows. Match Windows' 96.
+        root.tk.call("tk", "scaling", 96 / 72)
+        return
     if sys.platform != "win32":
         return
     for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont"):
@@ -94,7 +112,7 @@ def apply(root: tk.Tk, mode: str) -> dict:
     hand (the log, menus).
     """
     c = DARK if mode == "dark" else LIGHT
-    _fonts()
+    _fonts(root)
     style = ttk.Style(root)
     style.theme_use("clam")
     _base(style, c)

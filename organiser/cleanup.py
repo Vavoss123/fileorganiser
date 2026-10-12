@@ -1,6 +1,6 @@
 """Clearing out files the user has agreed they don't need.
 
-Everything goes to the Recycle Bin, never a permanent delete, and every file
+Everything goes to the Recycle Bin (or the Mac Trash), never a permanent delete, and every file
 is re-checked first: the scan may be minutes old by the time the user acts.
 """
 
@@ -10,7 +10,7 @@ import os
 import time
 from dataclasses import dataclass, field
 
-from . import duplicates, rules
+from . import duplicates, rules, system
 from .recycle import send_to_recycle_bin
 from .scan import FileInfo
 
@@ -26,7 +26,7 @@ class RecycleReport:
 
     @property
     def summary(self) -> str:
-        parts = ["{} file(s) sent to the Recycle Bin".format(len(self.recycled))]
+        parts = ["{} file(s) sent to the {}".format(len(self.recycled), system.BIN)]
         if self.failed:
             parts.append("{} left alone".format(len(self.failed)))
         return ", ".join(parts)

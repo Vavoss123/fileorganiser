@@ -8,19 +8,22 @@ from __future__ import annotations
 
 import datetime
 import os
+import sys
 import time
 from dataclasses import dataclass
 
 from . import rules
 from .scan import FileInfo, ScanResult
 
-#: Buckets routed to the Windows user libraries when ``route_to_libraries``.
+#: Buckets routed to the user's own folders when ``route_to_libraries``.
+#: A Mac calls the videos folder "Movies".
+_VIDEOS = "Movies" if sys.platform == "darwin" else "Videos"
 LIBRARY_ROOTS = {
     "Pictures": "Pictures",
     "Pictures/Raw": "Pictures",
     "Pictures/Vector": "Pictures",
     "Pictures/Screenshots": "Pictures",
-    "Videos": "Videos",
+    "Videos": _VIDEOS,
     "Audio": "Music",
     "Documents": "Documents",
     "Documents/Spreadsheets": "Documents",

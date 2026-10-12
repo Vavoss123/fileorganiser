@@ -17,6 +17,8 @@ from tkinter import ttk
 from typing import Callable
 
 from . import graph as graph_module
+from . import system
+from .theme import FAMILY
 from .plan import Move
 
 PALETTES = {
@@ -29,9 +31,9 @@ PALETTES = {
         "muted": "#8a8f98", "duplicate": "#e5484d", "root": "#3a3d44", "button": "#eef0f3",
     },
 }
-FONT = ("Segoe UI", 9)
-FOLDER_FONT = ("Segoe UI", 9, "bold")
-CAPTION_FONT = ("Segoe UI", 15, "bold")
+FONT = (FAMILY, 9)
+FOLDER_FONT = (FAMILY, 9, "bold")
+CAPTION_FONT = (FAMILY, 15, "bold")
 
 GROUP_COLOURS = {
     "Pictures": "#e5c07b",
@@ -163,7 +165,7 @@ class GraphView(ttk.Frame):
             self.panel_wanted = False
 
         self.play_button = self._canvas_button("▶  Before / after", self.play)
-        self.gear_button = self._canvas_button("⚙", self._toggle_panel, font=("Segoe UI", 12))
+        self.gear_button = self._canvas_button("⚙", self._toggle_panel, font=(FAMILY, 12))
         self.gear = self.canvas.create_window(0, 0, window=self.gear_button, anchor="ne",
                                               tags="chrome")
         self.play_item = self.canvas.create_window(0, 0, window=self.play_button, anchor="ne",
@@ -177,7 +179,7 @@ class GraphView(ttk.Frame):
             text="Scroll to zoom · drag to pan · double-click a file to open it, or a folder "
                  "to fold it · right-click for more",
         )
-        self.empty = self.canvas.create_text(0, 0, font=("Segoe UI", 11),
+        self.empty = self.canvas.create_text(0, 0, font=(FAMILY, 11),
                                              text="Choose a folder above and press Scan folder."
                                                   "\n\nYou'll see a map of where every file "
                                                   "would go. Nothing moves until you press Tidy.",
@@ -191,7 +193,7 @@ class GraphView(ttk.Frame):
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
         self.canvas.bind("<Double-1>", self._on_double)
-        self.canvas.bind("<Button-3>", self._on_right_click)
+        system.bind_right_click(self.canvas, self._on_right_click)
         self.canvas.bind("<MouseWheel>", self._on_wheel)
         self.canvas.bind("<Button-4>", lambda e: self._zoom_at(e.x, e.y, 1.1))
         self.canvas.bind("<Button-5>", lambda e: self._zoom_at(e.x, e.y, 1 / 1.1))
@@ -263,7 +265,8 @@ class GraphView(ttk.Frame):
 
         def wheel(event) -> None:
             if panel.winfo_reqheight() > holder.winfo_height():
-                holder.yview_scroll(int(-event.delta / 120), "units")
+                steps = system.wheel_steps(event)
+                holder.yview_scroll(-1 if steps > 0 else 1, "units")
 
         panel.bind("<Configure>", update)
         holder.bind("<Configure>", update)
@@ -278,7 +281,7 @@ class GraphView(ttk.Frame):
         def section(title: str, open_: bool = True) -> None:
             """A heading that folds its controls away when clicked, as in Obsidian."""
             nonlocal body
-            header = ttk.Label(panel, font=("Segoe UI", 9, "bold"), cursor="hand2")
+            header = ttk.Label(panel, font=(FAMILY, 9, "bold"), cursor="hand2")
             header.pack(fill="x", pady=(8, 2))
             content = ttk.Frame(panel)
 
@@ -838,7 +841,7 @@ class GraphView(ttk.Frame):
         if node.kind == "folder":
             self._fold(index)
         elif node.path and self.on_open:
-            self.on_open(node.path)  # a file opens; the root opens in Explorer
+            self.on_open(node.path)  # a file opens; the root opens in Explorer/Finder
 
     def _fold(self, index: int) -> None:
         self.collapsed ^= {self.graph.nodes[index].key}
@@ -865,7 +868,8 @@ class GraphView(ttk.Frame):
 
         if node.kind == "file":
             command("Open", lambda: self.on_open and self.on_open(path))
-            command("Show in Explorer", lambda: self.on_reveal and self.on_reveal(path))
+            command("Show in " + system.FILE_MANAGER,
+                    lambda: self.on_reveal and self.on_reveal(path))
             if node.move is not None:
                 menu.add_separator()
                 command("Skip this file" if node.move.include else "Include this file",
@@ -879,7 +883,7 @@ class GraphView(ttk.Frame):
         menu.tk_popup(event.x_root, event.y_root)
 
     def _on_wheel(self, event) -> None:
-        self._zoom_at(event.x, event.y, 1.1 ** (event.delta / 120))
+        self._zoom_at(event.x, event.y, 1.1 ** system.wheel_steps(event))
 
     def _zoom_at(self, x: int, y: int, factor: float) -> None:
         wx, wy = self.to_world(x, y)

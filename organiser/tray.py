@@ -20,6 +20,8 @@ MUTEX_NAME = "Local\\FileOrganiserTray"
 
 
 def available() -> bool:
+    if sys.platform != "win32":  # pystray needs the main thread on a Mac; not supported
+        return False
     try:
         import pystray  # noqa: F401
         import PIL  # noqa: F401

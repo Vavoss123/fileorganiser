@@ -604,5 +604,36 @@ class CancelTests(unittest.TestCase):
                 duplicates.find_duplicates(scan.scan(root).files, progress=stop)
 
 
+class MacTests(unittest.TestCase):
+    """Mac-only code that can still be checked on any computer."""
+
+    def test_login_item_is_a_launch_agent_that_runs_at_login(self):
+        import plistlib
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "LaunchAgents", "test.plist")
+            with mock.patch.object(startup, "_agent_path", lambda name: path):
+                startup._set_mac_mode("auto", "Test")
+                with open(path, "rb") as handle:
+                    agent = plistlib.load(handle)
+                self.assertTrue(agent["RunAtLoad"])
+                self.assertEqual(agent["ProgramArguments"][-1], "--auto")
+                startup._set_mac_mode("off", "Test")
+                self.assertFalse(os.path.exists(path))
+
+    def test_icon_can_be_written_for_a_mac(self):
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            self.skipTest("needs Pillow")
+        from organiser.icon import save_icns
+
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "icon.icns")
+            save_icns(path)
+            with open(path, "rb") as handle:
+                self.assertEqual(handle.read(4), b"icns")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

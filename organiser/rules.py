@@ -13,6 +13,7 @@ Two kinds of rule:
 from __future__ import annotations
 
 import os
+import sys
 
 TYPE_RULES: dict[str, str] = {}
 APP_RULES: dict[str, str] = {}
@@ -34,8 +35,12 @@ _add(TYPE_RULES, "Documents/Spreadsheets", "xls xlsx xlsm xlsb csv tsv ods numbe
 _add(TYPE_RULES, "Documents/Presentations", "ppt pptx pptm odp key")
 _add(TYPE_RULES, "Documents/Ebooks", "epub mobi azw azw3 fb2 cbz cbr")
 _add(TYPE_RULES, "Archives", "zip rar 7z tar gz tgz bz2 tbz2 xz zst lz4 cab arj lzh")
-_add(TYPE_RULES, "Installers", "exe msi msix msixbundle appx appxbundle appinstaller msu")
+_add(TYPE_RULES, "Installers", "exe msi msix msixbundle appx appxbundle appinstaller msu "
+                               "pkg mpkg")
 _add(TYPE_RULES, "Disk Images", "iso img vhd vhdx dmg bin cue nrg")
+if sys.platform == "darwin":
+    # On a Mac, a .dmg is how most apps are downloaded: once installed, it's done.
+    _add(TYPE_RULES, "Installers", "dmg")
 _add(TYPE_RULES, "Code", "py js mjs cjs ts tsx jsx java kt c cc cpp cxx h hpp cs go rs rb php "
                          "swift lua pl r scala sh bash zsh ps1 psm1 sql vb asm")
 _add(TYPE_RULES, "Code/Data", "json yaml yml toml ini cfg conf xml env proto graphql")

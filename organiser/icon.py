@@ -1,6 +1,7 @@
 """The app's icon, drawn in code so there is no image file to keep in sync.
 
-Used for the tray icon at runtime and written out as ``.ico`` at build time.
+Used for the tray icon at runtime and written out as ``.ico`` (Windows) or
+``.icns`` (macOS) at build time.
 Needs Pillow, which only the tray and the build use.
 """
 
@@ -35,3 +36,7 @@ def make_image(size: int = 256):
 def save_ico(path: str) -> None:
     sizes = [16, 20, 24, 32, 40, 48, 64, 128, 256]
     make_image(256).save(path, sizes=[(n, n) for n in sizes])
+
+
+def save_icns(path: str) -> None:
+    make_image(1024).save(path, format="ICNS")

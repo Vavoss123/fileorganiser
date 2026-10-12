@@ -1,8 +1,10 @@
-"""Sending files to the Windows Recycle Bin - recoverable, never a hard delete."""
+"""Sending files to the Recycle Bin (Windows) or the Trash (macOS) -
+recoverable, never a hard delete."""
 
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 
 
@@ -12,8 +14,11 @@ def send_to_recycle_bin(path: str) -> None:
     If Windows cannot recycle the file (too big for the bin, or a drive
     without one) it asks the user rather than deleting it outright.
     """
+    if sys.platform == "darwin":
+        _trash_on_mac(path)
+        return
     if sys.platform != "win32":
-        raise OSError("the Recycle Bin is only available on Windows")
+        raise OSError("the Trash is only supported on Windows and macOS")
 
     import ctypes
     from ctypes import wintypes
@@ -51,5 +56,26 @@ def send_to_recycle_bin(path: str) -> None:
         raise OSError("Windows could not recycle the file (code 0x{:x})".format(result))
     if operation.fAnyOperationsAborted:
         raise OSError("cancelled")
+    if os.path.exists(path):
+        raise OSError("the file is still there")
+
+
+def _trash_on_mac(path: str) -> None:
+    """Ask Finder to move *path* to the Trash, so "Put Back" works as usual.
+
+    The first time, macOS asks the user to let File Organiser control Finder.
+    If they say no, the file stays where it is and this raises.
+    """
+    path = os.path.abspath(path)
+    script = (
+        "on run argv\n"
+        "  tell application \"Finder\" to delete (POSIX file (item 1 of argv) as alias)\n"
+        "end run"
+    )
+    result = subprocess.run(["osascript", "-e", script, path],
+                            capture_output=True, text=True, timeout=60)
+    if result.returncode != 0:
+        raise OSError("Finder could not move it to the Trash: "
+                      + (result.stderr.strip() or "code {}".format(result.returncode)))
     if os.path.exists(path):
         raise OSError("the file is still there")

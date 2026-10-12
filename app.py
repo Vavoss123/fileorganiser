@@ -1,9 +1,9 @@
-"""File Organiser - a small Windows desktop app for tidying a cluttered folder.
+"""File Organiser - a small Windows and macOS app for tidying a cluttered folder.
 
 The app always shows you a plan first. Scanning and hashing never change
 anything on disk; files move only when you press "Tidy", and
 that run can be undone. Nothing is ever permanently deleted: duplicates go to
-the Recycle Bin, and only when you ask.
+the Recycle Bin (the Trash on a Mac), and only when you ask.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
-from organiser import theme, updates  # noqa: E402
+from organiser import system, theme, updates  # noqa: E402
 from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
@@ -36,11 +36,11 @@ PAD = 10
 
 #: Keyboard shortcuts, as shown in the welcome screen: (keys, what they do).
 SHORTCUTS = (
-    ("Ctrl+O", "Choose a folder"),
+    (system.MOD + "O", "Choose a folder"),
     ("F5", "Scan the folder"),
     ("Esc", "Stop a scan"),
-    ("Ctrl+Enter", "Tidy the ticked files"),
-    ("Ctrl+Z", "Undo a tidy"),
+    (system.MOD + ("Return" if system.MAC else "Enter"), "Tidy the ticked files"),
+    (system.MOD + "Z", "Undo a tidy"),
     ("F1", "Show the welcome screen again"),
 )
 
@@ -116,7 +116,7 @@ def display_folder(path: str, root: str | None) -> str:
 
 
 def reveal(path: str) -> None:
-    """Show a file in Explorer (or the platform equivalent)."""
+    """Show a file in Explorer or Finder."""
     try:
         if sys.platform == "win32":
             subprocess.Popen(["explorer", "/select,{}".format(os.path.normpath(path))])
@@ -129,7 +129,7 @@ def reveal(path: str) -> None:
 
 
 def open_path(path: str, parent: tk.Misc | None = None) -> None:
-    """Open a file in its usual program, or a folder in Explorer."""
+    """Open a file in its usual program, or a folder in Explorer or Finder."""
     if not os.path.exists(path):
         messagebox.showinfo(
             "File Organiser",
@@ -304,12 +304,13 @@ class OrganiserApp(ttk.Frame):
 
     def _bind_shortcuts(self) -> None:
         root = self.master
-        root.bind("<Control-o>", lambda _e: self.browse())
-        root.bind("<Control-O>", lambda _e: self.browse())
+        mod = system.TK_MOD
+        root.bind("<{}-o>".format(mod), lambda _e: self.browse())
+        root.bind("<{}-O>".format(mod), lambda _e: self.browse())
         root.bind("<F5>", lambda _e: self.start_scan(show_graph=True))
         root.bind("<Escape>", lambda _e: self.cancel_scan())
-        root.bind("<Control-Return>", lambda _e: self.apply_plan())
-        root.bind("<Control-z>", lambda _e: self.undo_last())
+        root.bind("<{}-Return>".format(mod), lambda _e: self.apply_plan())
+        root.bind("<{}-z>".format(mod), lambda _e: self.undo_last())
         root.bind("<F1>", lambda _e: self.show_welcome())
 
     def _theme_popup(self, button: ttk.Button) -> None:
@@ -389,9 +390,10 @@ class OrganiserApp(ttk.Frame):
               "they were last changed, such as Pictures/2026/10.")
         ttk.Combobox(options, textvariable=self.date_var, values=list(DATE_CHOICES.values()),
                      state="readonly", width=18).grid(row=1, column=3, sticky="w")
-        if sys.platform == "win32":
+        if system.WINDOWS or system.MAC:
             label(4, "When I sign in", "Let the app tidy this folder for you each time you "
-                  "sign in to Windows, or keep watching it from the system tray.")
+                  "sign in" + (", or keep watching it from the system tray."
+                               if system.WINDOWS else "."))
             choices = [STARTUP_CHOICES["off"], STARTUP_CHOICES["auto"]]
             if tray.available():
                 choices.append(STARTUP_CHOICES["tray"])
@@ -405,9 +407,11 @@ class OrganiserApp(ttk.Frame):
               "faster.")
         check(2, "Sort unknown types into 'Other'", self.other_var,
               "Off leaves files the app doesn't recognise where they are.")
-        check(4, "Use my Windows libraries", self.libraries_var,
-              "Send photos to Pictures, videos to Videos, music to Music and documents to "
-              "Documents in your user folder, instead of folders inside the one being tidied.")
+        check(4, "Use my Mac folders" if system.MAC else "Use my Windows libraries",
+              self.libraries_var,
+              "Send photos to Pictures, videos to {}, music to Music and documents to "
+              "Documents in your user folder, instead of folders inside the one being "
+              "tidied.".format("Movies" if system.MAC else "Videos"))
         rules = ttk.Button(options, text="Custom rules…", command=self.edit_rules,
                            style="Small.TButton")
         rules.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
@@ -503,7 +507,7 @@ class OrganiserApp(ttk.Frame):
         ttk.Button(bar, text="Select none", command=lambda: self._set_all(False)).pack(
             side="left", padx=6
         )
-        ttk.Button(bar, text="Show in Explorer", command=self._reveal_plan_selection).pack(
+        ttk.Button(bar, text="Show in " + system.FILE_MANAGER, command=self._reveal_plan_selection).pack(
             side="left", padx=6
         )
         self.plan_summary = ttk.Label(bar, text="Nothing scanned yet.")
@@ -531,18 +535,18 @@ class OrganiserApp(ttk.Frame):
             page,
             text=(
                 "Identical content, proven byte for byte. Copies marked 'safe to delete' "
-                "can be sent to the Recycle Bin, so you can still restore them."
+                "can be sent to the {}, so you can still restore them.".format(system.BIN)
             ),
             wraplength=900,
         ).grid(row=0, column=0, sticky="w")
         bar = ttk.Frame(page)
         bar.grid(row=1, column=0, sticky="ew", pady=6)
-        ttk.Button(bar, text="Show in Explorer", command=self._reveal_duplicate_selection).pack(
+        ttk.Button(bar, text="Show in " + system.FILE_MANAGER, command=self._reveal_duplicate_selection).pack(
             side="left"
         )
         self.recycle_duplicates_button = ttk.Button(
             bar,
-            text="Send duplicates to Recycle Bin",
+            text="Send duplicates to " + system.BIN,
             command=self._recycle_duplicates,
             state="disabled",
         )
@@ -578,7 +582,7 @@ class OrganiserApp(ttk.Frame):
         ).grid(row=0, column=0, sticky="w")
         bar = ttk.Frame(page)
         bar.grid(row=1, column=0, sticky="ew", pady=6)
-        ttk.Button(bar, text="Show in Explorer", command=self._reveal_version_selection).pack(
+        ttk.Button(bar, text="Show in " + system.FILE_MANAGER, command=self._reveal_version_selection).pack(
             side="left"
         )
         self.version_summary = ttk.Label(bar, text="")
@@ -608,12 +612,12 @@ class OrganiserApp(ttk.Frame):
         ).grid(row=0, column=0, sticky="w")
         bar = ttk.Frame(page)
         bar.grid(row=1, column=0, sticky="ew", pady=6)
-        ttk.Button(bar, text="Show in Explorer", command=self._reveal_installer_selection).pack(
+        ttk.Button(bar, text="Show in " + system.FILE_MANAGER, command=self._reveal_installer_selection).pack(
             side="left"
         )
         self.recycle_installers_button = ttk.Button(
             bar,
-            text="Send all to Recycle Bin",
+            text="Send all to " + system.BIN,
             command=self._recycle_installers,
             state="disabled",
         )
@@ -1145,7 +1149,7 @@ class OrganiserApp(ttk.Frame):
 
         tree.bind("<Double-1>", on_double)
         tree.bind("<Return>", lambda _e: self._open_selection(tree))
-        tree.bind("<Button-3>", lambda e: self._tree_menu(tree, e))
+        system.bind_right_click(tree, lambda e: self._tree_menu(tree, e))
 
     def _open_selection(self, tree: ttk.Treeview) -> None:
         path = self._selected_path(tree)
@@ -1163,7 +1167,7 @@ class OrganiserApp(ttk.Frame):
             return
         menu = tk.Menu(self, tearoff=False, **self._menu_colours())
         menu.add_command(label="Open", command=lambda: open_path(path, self))
-        menu.add_command(label="Show in Explorer", command=lambda: reveal(path))
+        menu.add_command(label="Show in " + system.FILE_MANAGER, command=lambda: reveal(path))
         menu.add_command(label="Open containing folder",
                          command=lambda: open_path(os.path.dirname(path), self))
         if tree is self.plan_tree:
@@ -1204,10 +1208,10 @@ class OrganiserApp(ttk.Frame):
         if not files or (self.worker and self.worker.is_alive()):
             return
         if not messagebox.askokcancel(
-            "Send old installers to Recycle Bin",
-            "Send {} installer(s) ({}) to the Recycle Bin?\n\n"
-            "You can restore them from the Recycle Bin.".format(
-                len(files), human_size(sum(f.size for f in files))
+            "Send old installers to " + system.BIN,
+            "Send {} installer(s) ({}) to the {bin}?\n\n"
+            "You can restore them from the {bin}.".format(
+                len(files), human_size(sum(f.size for f in files)), bin=system.BIN
             ),
         ):
             return
@@ -1229,10 +1233,11 @@ class OrganiserApp(ttk.Frame):
             return
         wasted = sum(group.wasted for group in groups)
         if not messagebox.askokcancel(
-            "Send duplicates to Recycle Bin",
-            "Send {} duplicate file(s) ({}) to the Recycle Bin?\n\n"
+            "Send duplicates to " + system.BIN,
+            "Send {} duplicate file(s) ({}) to the {bin}?\n\n"
             "One copy of each is kept. Each file is checked again first, and "
-            "you can restore them from the Recycle Bin.".format(count, human_size(wasted)),
+            "you can restore them from the {bin}.".format(count, human_size(wasted),
+                                                          bin=system.BIN),
         ):
             return
         self._after_recycle(cleanup.recycle_duplicates(groups))
@@ -1557,7 +1562,47 @@ def _sharpen_on_high_dpi() -> None:
         pass
 
 
+def _smoke_test(root: tk.Tk, app: "OrganiserApp", folder: str) -> None:
+    """Exercise the real window briefly, then exit 0, or 1 on any error.
+
+    The release workflow runs the built app this way, so a build that can't
+    open its window, scan or draw the map is never published.
+    """
+    errors: list[str] = []
+
+    def failed(kind, value, trace) -> None:
+        import traceback
+
+        errors.append("".join(traceback.format_exception(kind, value, trace)))
+
+    root.report_callback_exception = failed
+
+    def finish() -> None:
+        if not app.plan or not app.plan.moves:
+            errors.append("the scan found nothing to move")
+        print("\n".join(errors) or "smoke test passed: {} moves planned".format(
+            len(app.plan.moves) if app.plan else 0))
+        root.destroy()
+        sys.exit(1 if errors else 0)
+
+    app.folder_var.set(folder)
+    root.after(500, lambda: app.start_scan(show_graph=True))
+    root.after(4000, app.graph_view.play)
+    root.after(9000, finish)
+
+
 def main() -> None:
+    smoke = None
+    if "--smoke-test" in sys.argv[1:]:
+        import tempfile
+
+        smoke = tempfile.mkdtemp()
+        os.environ["LOCALAPPDATA"] = os.path.join(smoke, "settings")  # leave real ones alone
+        os.makedirs(os.path.join(smoke, "messy"))
+        for name in ("photo.jpg", "notes.pdf", "song.mp3", "archive.zip", "photo copy.jpg"):
+            with open(os.path.join(smoke, "messy", name), "wb") as handle:
+                handle.write(b"same" if "photo" in name else name.encode())
+        config.save(dict(config.load(), welcomed=True, check_updates=False, settle_seconds=0))
     if "--auto" in sys.argv[1:]:
         auto.run()
         return
@@ -1579,9 +1624,17 @@ def main() -> None:
     except Exception:
         pass
     app = OrganiserApp(root)
-    root.protocol(
-        "WM_DELETE_WINDOW", lambda: (config.save(app.current_settings()), root.destroy())
-    )
+
+    def close() -> None:
+        config.save(app.current_settings())
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", close)
+    if smoke:
+        _smoke_test(root, app, os.path.join(smoke, "messy"))
+    if system.MAC:
+        root.createcommand("tk::mac::Quit", close)  # Cmd+Q and the app menu's Quit
+        root.createcommand("tk::mac::ShowHelp", app.show_welcome)
     root.mainloop()
 
 

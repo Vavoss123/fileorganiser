@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 
 APP_NAME = "FileOrganiser"
 
@@ -26,8 +27,10 @@ DEFAULTS: dict = {
 
 
 def _base_dir() -> str:
-    root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
-    return os.path.join(root, APP_NAME)
+    root = os.environ.get("LOCALAPPDATA")
+    if not root and sys.platform == "darwin":
+        root = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    return os.path.join(root or os.path.expanduser("~"), APP_NAME)
 
 
 def config_path() -> str:

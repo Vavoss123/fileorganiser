@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import ssl
 import urllib.request
 
 from . import __version__
@@ -42,11 +43,22 @@ def latest_release(timeout: float = 6.0) -> tuple[str, str] | None:
                  "User-Agent": "FileOrganiser/" + __version__},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(request, timeout=timeout, context=_tls()) as response:
             data = json.load(response)
         return data["tag_name"], data.get("html_url") or RELEASES_PAGE
     except Exception:  # offline, rate-limited, unexpected reply: stay quiet
         return None
+
+
+def _tls() -> ssl.SSLContext:
+    """Certificates for the HTTPS request. A built Mac app can't always see the
+    system's, so use certifi's when it is bundled."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def newer_release() -> tuple[str, str] | None:
