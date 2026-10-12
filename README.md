@@ -109,6 +109,27 @@ If a file with the same name already exists at the destination, the incoming
 file is renamed to `name (2).ext`. The new name is shown in the plan. Existing
 files are never overwritten.
 
+### Graph tab
+
+The same plan drawn as a map, in the style of Obsidian's graph view. The
+folder being tidied sits in the middle, each destination folder branches off
+it, and every file is a dot with an arrow to the folder it will move into.
+Colours follow the top-level folder (Pictures, Documents and so on). Copies of
+the same file are joined by a dashed red line.
+
+- Scroll to zoom, drag the background to pan, and drag a dot to pull it about.
+- Hover a dot to light up what it is linked to. Click it to see its details.
+- Right-click a file to include or skip it. This also updates the Plan tab.
+  Skipped files are drawn hollow.
+- Double-click a file to show it in Explorer.
+
+The panel on the right (hide it with the gear button) has a search box,
+filters for files, files already in place and duplicate links, and the
+display and force settings: label fading, dot size, line thickness, and how
+strongly things pull together or push apart. **Animate** shakes the graph up
+and lets it settle again; **Fit** brings everything into view. With more than
+1,000 files only the folders are drawn.
+
 ### Duplicates tab
 
 Groups of files with exactly the same content, whatever their names. For
@@ -317,6 +338,8 @@ organiser/
   plan.py                    deciding where each file goes
   apply.py                   moving files, undo records, undo
   duplicates.py              finding duplicates and possible versions
+  graph.py                   the plan as a graph, and its force layout
+  graphview.py               the Graph tab: drawing and interaction
   cleanup.py                 Recycle Bin clear-outs, old installers
   recycle.py                 the Windows Recycle Bin call
   auto.py                    scan and plan in one step, the --auto run

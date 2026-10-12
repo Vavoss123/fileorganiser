@@ -16,6 +16,7 @@ os.environ["LOCALAPPDATA"] = _APPDATA.name
 
 from organiser import apply as apply_module
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup
+from organiser import graph as graph_module
 
 
 def write(folder: str, name: str, content: bytes = b"x") -> str:
@@ -479,6 +480,67 @@ class AutoTests(unittest.TestCase):
         for mode in ("auto", "tray", "off"):
             startup.set_mode(mode, name)
             self.assertEqual(startup.current_mode(name), mode)
+
+class GraphTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def graph_for(self, **kwargs):
+        result = scan.scan(self.root, ignore_folders=set(rules.known_destinations()))
+        built = plan_module.build_plan(result, date_folders="year")
+        groups = duplicates.find_duplicates(result.files)
+        return graph_module.build_graph(built, groups, **kwargs)
+
+    def test_files_hang_off_their_destination_folder(self):
+        write(self.root, "cat.png", b"cat")
+        write(self.root, "model.blend")
+        graph = self.graph_for()
+        cat = graph.nodes[graph.index["file:" + os.path.normcase(os.path.join(self.root, "cat.png"))]]
+        folder = graph.nodes[next(iter(cat.neighbours))]
+        self.assertEqual(folder.kind, "folder")
+        self.assertEqual(folder.group, "Pictures")
+        self.assertIn("folder:apps/blender", graph.index)
+        self.assertEqual(graph.nodes[graph.index["folder:apps"]].count, 1)
+        self.assertEqual(graph.nodes[graph.index["root"]].count, 2)
+
+    def test_duplicates_are_linked(self):
+        write(self.root, "a.pdf", b"same")
+        write(self.root, "a (1).pdf", b"same")
+        graph = self.graph_for()
+        self.assertEqual([e.kind for e in graph.edges].count("duplicate"), 1)
+        self.assertEqual(sum(node.duplicate for node in graph.nodes), 2)
+        self.assertEqual(
+            [e.kind for e in self.graph_for(show_duplicates=False).edges].count("duplicate"), 0
+        )
+
+    def test_too_many_files_shows_folders_only(self):
+        for index in range(5):
+            write(self.root, "photo{}.jpg".format(index), str(index).encode())
+        graph = self.graph_for(max_files=3)
+        self.assertTrue(graph.truncated)
+        self.assertFalse(any(node.kind == "file" for node in graph.nodes))
+
+    def test_simulation_settles(self):
+        for index in range(40):
+            write(self.root, "file{}.{}".format(index, ("jpg", "pdf", "zip", "mp3")[index % 4]),
+                  str(index).encode())
+        graph = self.graph_for()
+        sim = graph_module.Simulation(graph)
+        for _ in range(400):
+            sim.step()
+        self.assertFalse(sim.running)
+        for node in graph.nodes:
+            self.assertTrue(abs(node.x) < 1e5 and abs(node.y) < 1e5)
+        # Files end up nearer their own folder than the far side of the graph.
+        for edge in graph.edges:
+            if edge.kind == "move":
+                a, b = graph.nodes[edge.a], graph.nodes[edge.b]
+                self.assertLess(((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5, 400)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

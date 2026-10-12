@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
+from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
 DATE_CHOICES = {"off": "Off", "year": "By year", "month": "By year and month"}
@@ -83,6 +84,7 @@ class OrganiserApp(ttk.Frame):
         self.version_groups: list[duplicates.VersionGroup] = []
         self.old_installers: list[scan.FileInfo] = []
         self.move_for_item: dict[str, plan_module.Move] = {}
+        self.item_for_move: dict[int, str] = {}
         self.children_of: dict[str, list[str]] = {}
         self.path_for_item: dict[str, str] = {}
 
@@ -168,6 +170,8 @@ class OrganiserApp(ttk.Frame):
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=2, column=0, sticky="nsew")
         self.tabs.add(self._build_plan_tab(), text="Plan")
+        self.graph_view = GraphView(self, on_toggle=self._toggle_move, on_reveal=reveal)
+        self.tabs.add(self.graph_view, text="Graph")
         self.tabs.add(self._build_duplicates_tab(), text="Duplicates")
         self.tabs.add(self._build_versions_tab(), text="Possible versions")
         self.tabs.add(self._build_installers_tab(), text="Old installers")
@@ -533,6 +537,7 @@ class OrganiserApp(ttk.Frame):
         self._fill_duplicate_tree()
         self._fill_version_tree()
         self._fill_installer_tree()
+        self.graph_view.set_data(built, groups)
         self._busy(False)
 
         wasted = sum(group.wasted for group in groups)
@@ -554,6 +559,7 @@ class OrganiserApp(ttk.Frame):
         tree = self.plan_tree
         tree.delete(*tree.get_children())
         self.move_for_item.clear()
+        self.item_for_move.clear()
         self.children_of.clear()
 
         buckets: dict[str, list[plan_module.Move]] = {}
@@ -588,6 +594,7 @@ class OrganiserApp(ttk.Frame):
                     values=(CHECK, bucket, human_size(move.info.size)),
                 )
                 self.move_for_item[item] = move
+                self.item_for_move[id(move)] = item
                 kids.append(item)
             self.children_of[parent] = kids
 
@@ -714,6 +721,14 @@ class OrganiserApp(ttk.Frame):
             return
         self._set_item(item, self.plan_tree.set(item, "include") != CHECK)
         self._refresh_apply_state()
+        self.graph_view.refresh()
+
+    def _toggle_move(self, move: plan_module.Move) -> None:
+        """Include or skip one file, from a right-click in the graph."""
+        item = self.item_for_move.get(id(move))
+        if item:
+            self._set_item(item, not move.include)
+            self._refresh_apply_state()
 
     def _set_item(self, item: str, included: bool) -> None:
         self.plan_tree.set(item, "include", CHECK if included else "")
@@ -731,6 +746,7 @@ class OrganiserApp(ttk.Frame):
         for parent in self.plan_tree.get_children():
             self._set_item(parent, included)
         self._refresh_apply_state()
+        self.graph_view.refresh()
 
     def _refresh_apply_state(self) -> None:
         count = len(self.plan.selected) if self.plan else 0
