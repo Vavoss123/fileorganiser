@@ -40,6 +40,8 @@ nothing is ever permanently deleted.
 - Your own rules, for example `.pdf` to `Documents/Receipts`.
 - Optional year or month folders for photos and videos.
 - Can tidy automatically when you sign in, or keep tidying from the system tray.
+- A graph view of the plan, like Obsidian's, with a before/after animation.
+- Light and dark themes.
 
 ## Installing
 
@@ -100,6 +102,7 @@ remembers the folder and all options for next time.
 | Date folders for photos and videos | Off, by year (`Pictures/2026`) or by year and month (`Pictures/2026/10`). Uses the date each file was last modified. |
 | When I sign in | Do nothing, tidy once, or keep tidying from the tray. See [Automatic tidying](#automatic-tidying). |
 | Custom rules… | Choose your own folder for any file type. See below. |
+| Theme | Light, dark, or the same as Windows. The Graph tab follows it too. |
 
 ### Plan tab
 
@@ -118,20 +121,33 @@ The same plan drawn as a map, in the style of Obsidian's graph view. The
 folder being tidied sits in the middle, each destination folder branches off
 it, and every file is a dot with an arrow to the folder it will move into.
 Colours follow the top-level folder (Pictures, Documents and so on). Copies of
-the same file are joined by a dashed red line.
+the same file are joined by a dashed red line. The app opens this tab when a
+scan finds something to move.
 
+- Press **Before / after** to watch the plan happen: every file starts loose
+  in the folder being tidied, then flies to the folder it is going to.
+  Nothing moves on disk.
 - Scroll to zoom, drag the background to pan, and drag a dot to pull it about.
 - Hover a dot to light up what it is linked to. Click it to see its details.
 - Right-click a file to include or skip it. This also updates the Plan tab.
   Skipped files are drawn hollow.
+- Double-click a folder to fold its files away into it, and again to unfold
+  it. Folded folders wear a ring and show how many files they hold. Scans
+  with more than 1,000 files start with their biggest folders folded.
 - Double-click a file to show it in Explorer.
 
-The panel on the right (hide it with the gear button) has a search box,
-filters for files, files already in place and duplicate links, and the
-display and force settings: label fading, dot size, line thickness, and how
-strongly things pull together or push apart. **Animate** shakes the graph up
-and lets it settle again; **Fit** brings everything into view. With more than
-1,000 files only the folders are drawn.
+The panel on the right (hide it with the gear button) has:
+
+- **Filters**: a search box, and switches for files, files already in place
+  and duplicate links.
+- **Groups**: the colour of each top-level folder, with its file count or size.
+- **Display**: whether dot size shows the number of files or the disk space
+  they take up, arrows, label fading, dot size and line thickness.
+  **Animate** shakes the graph up and lets it settle again, **Fit** brings
+  everything into view, and **Fold all** / **Unfold all** do what they say.
+- **Forces**: how strongly things pull together or push apart.
+
+The panel settings are remembered between runs.
 
 ### Duplicates tab
 
@@ -261,7 +277,7 @@ Everything is stored in `%LOCALAPPDATA%\FileOrganiser\`:
 
 | Path | Contents |
 | --- | --- |
-| `settings.json` | Your folder and options. |
+| `settings.json` | Your folder, options, theme and Graph tab settings. |
 | `journal\*.jsonl` | One undo record per run. Undone runs are renamed to `.undone`. Older versions used `.json`; these can still be undone. |
 | `auto.log` | Log of automatic and tray runs. Starts afresh after 1 MB, keeping one `auto.log.old`. |
 
@@ -360,6 +376,7 @@ organiser/
   duplicates.py              finding duplicates and possible versions
   graph.py                   the plan as a graph, and its force layout
   graphview.py               the Graph tab: drawing and interaction
+  theme.py                   the light and dark looks
   cleanup.py                 Recycle Bin clear-outs, old installers
   recycle.py                 the Windows Recycle Bin call
   auto.py                    scan and plan in one step, the --auto run

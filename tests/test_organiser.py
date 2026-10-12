@@ -517,12 +517,34 @@ class GraphTests(unittest.TestCase):
             [e.kind for e in self.graph_for(show_duplicates=False).edges].count("duplicate"), 0
         )
 
-    def test_too_many_files_shows_folders_only(self):
+    def test_too_many_files_folds_the_biggest_folders(self):
         for index in range(5):
             write(self.root, "photo{}.jpg".format(index), str(index).encode())
+        write(self.root, "notes.txt", b"n")
         graph = self.graph_for(max_files=3)
-        self.assertTrue(graph.truncated)
-        self.assertFalse(any(node.kind == "file" for node in graph.nodes))
+        self.assertFalse(graph.truncated)
+        self.assertEqual(graph.collapsed, {"folder:pictures"})
+        pictures = graph.nodes[graph.index["folder:pictures"]]
+        self.assertTrue(pictures.collapsed)
+        self.assertEqual((pictures.hidden, pictures.count), (5, 5))
+        self.assertEqual([n.label for n in graph.nodes if n.kind == "file"], ["notes.txt"])
+
+    def test_folding_hides_subfolders_and_unfolding_shows_them(self):
+        write(self.root, "photo.jpg")
+        write(self.root, "shot.dng", b"raw")
+        folded = self.graph_for(collapsed={"folder:pictures"})
+        self.assertNotIn("folder:pictures/raw", folded.index)
+        self.assertEqual(folded.nodes[folded.index["folder:pictures"]].hidden, 2)
+        opened = self.graph_for(collapsed=set())
+        self.assertIn("folder:pictures/raw", opened.index)
+        self.assertEqual(sum(n.kind == "file" for n in opened.nodes), 2)
+
+    def test_size_by_space_makes_big_files_bigger(self):
+        write(self.root, "big.zip", b"x" * 100000)
+        write(self.root, "small.zip", b"x")
+        graph = self.graph_for(size_by="space")
+        weight = {n.label: n.weight for n in graph.nodes}
+        self.assertGreater(weight["big.zip"], weight["small.zip"] * 3)
 
     def test_simulation_settles(self):
         for index in range(40):

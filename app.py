@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
+from organiser import theme  # noqa: E402
 from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
@@ -98,9 +99,15 @@ class OrganiserApp(ttk.Frame):
         )
         self.startup_var = tk.StringVar(value=STARTUP_CHOICES[startup.current_mode()])
         self.status_var = tk.StringVar(value="Pick a folder and press Scan.")
+        self.theme_var = tk.StringVar(
+            value=theme.CHOICES.get(self.settings.get("theme"), theme.CHOICES["system"])
+        )
+        self.show_graph_after_scan = False
+        self.palette = theme.apply(master, theme.resolve(self.settings.get("theme", "system")))
 
         self.pack(fill="both", expand=True)
         self._build()
+        self._colour_plain_widgets()
         self.after(100, self._drain_events)
 
     # ------------------------------------------------------------------ layout
@@ -115,9 +122,11 @@ class OrganiserApp(ttk.Frame):
         ttk.Label(chooser, text="Folder to tidy").grid(row=0, column=0, padx=(0, 8))
         entry = ttk.Entry(chooser, textvariable=self.folder_var)
         entry.grid(row=0, column=1, sticky="ew")
-        entry.bind("<Return>", lambda _e: self.start_scan())
+        entry.bind("<Return>", lambda _e: self.start_scan(show_graph=True))
         ttk.Button(chooser, text="Browse…", command=self.browse).grid(row=0, column=2, padx=6)
-        self.scan_button = ttk.Button(chooser, text="Scan", command=self.start_scan)
+        self.scan_button = ttk.Button(
+            chooser, text="Scan", command=lambda: self.start_scan(show_graph=True)
+        )
         self.scan_button.grid(row=0, column=3)
 
         options = ttk.Labelframe(self, text="Options", padding=8)
@@ -166,11 +175,24 @@ class OrganiserApp(ttk.Frame):
         ttk.Button(options, text="Custom rules…", command=self.edit_rules).grid(
             row=0, column=3, sticky="e"
         )
+        look = ttk.Frame(options)
+        look.grid(row=1, column=3, rowspan=2, sticky="ne", pady=(4, 0))
+        ttk.Label(look, text="Theme").pack(side="left", padx=(0, 6))
+        theme_box = ttk.Combobox(
+            look, textvariable=self.theme_var, values=list(theme.CHOICES.values()),
+            state="readonly", width=16,
+        )
+        theme_box.pack(side="left")
+        theme_box.bind("<<ComboboxSelected>>", lambda _e: self._change_theme())
 
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=2, column=0, sticky="nsew")
         self.tabs.add(self._build_plan_tab(), text="Plan")
-        self.graph_view = GraphView(self, on_toggle=self._toggle_move, on_reveal=reveal)
+        self.graph_view = GraphView(
+            self, on_toggle=self._toggle_move, on_reveal=reveal,
+            settings=self.settings.get("graph"),
+            mode=theme.resolve(self.settings.get("theme", "system")),
+        )
         self.tabs.add(self.graph_view, text="Graph")
         self.tabs.add(self._build_duplicates_tab(), text="Duplicates")
         self.tabs.add(self._build_versions_tab(), text="Possible versions")
@@ -280,8 +302,6 @@ class OrganiserApp(ttk.Frame):
         frame.grid(row=2, column=0, sticky="nsew")
         self.duplicate_tree.bind("<Double-1>", lambda _e: self._reveal_duplicate_selection())
         self.duplicate_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
-        self.duplicate_tree.tag_configure("keep", foreground="#1a7f37")
-        self.duplicate_tree.tag_configure("extra", foreground="#a40e26")
         return page
 
     def _build_versions_tab(self) -> ttk.Frame:
@@ -377,6 +397,27 @@ class OrganiserApp(ttk.Frame):
         if chosen:
             self.folder_var.set(os.path.normpath(chosen))
 
+    def _theme_choice(self) -> str:
+        return next((k for k, v in theme.CHOICES.items() if v == self.theme_var.get()), "system")
+
+    def _change_theme(self) -> None:
+        mode = theme.resolve(self._theme_choice())
+        self.palette = theme.apply(self.master, mode)
+        self._colour_plain_widgets()
+        self.graph_view.set_theme(mode)
+        config.save(self.current_settings())
+
+    def _colour_plain_widgets(self) -> None:
+        """Colour the few plain Tk widgets that ttk styles cannot reach."""
+        palette = self.palette
+        self.log_text.configure(
+            background=palette["field"], foreground=palette["text"],
+            insertbackground=palette["text"], selectbackground=palette["select"],
+            relief="flat", borderwidth=1,
+        )
+        self.duplicate_tree.tag_configure("keep", foreground=palette["good"])
+        self.duplicate_tree.tag_configure("extra", foreground=palette["bad"])
+
     def edit_rules(self) -> None:
         dialog = RulesDialog(self.master, self.settings.get("overrides", {}))
         self.master.wait_window(dialog)
@@ -431,6 +472,8 @@ class OrganiserApp(ttk.Frame):
             "date_folders": next(
                 (k for k, v in DATE_CHOICES.items() if v == self.date_var.get()), "off"
             ),
+            "theme": self._theme_choice(),
+            "graph": self.graph_view.settings(),
         })
         return settings
 
@@ -446,7 +489,9 @@ class OrganiserApp(ttk.Frame):
 
     # -------------------------------------------------------------------- scan
 
-    def start_scan(self) -> None:
+    def start_scan(self, show_graph: bool = False) -> None:
+        """Scan the chosen folder. *show_graph* opens the Graph tab when the
+        results arrive; rescans after moving or undoing leave the tab alone."""
         folder = self.folder_var.get().strip()
         if not os.path.isdir(folder):
             messagebox.showerror("File Organiser", "Not a folder:\n{}".format(folder))
@@ -455,6 +500,7 @@ class OrganiserApp(ttk.Frame):
             return
         self.settings = self.current_settings()
         config.save(self.settings)
+        self.show_graph_after_scan = show_graph
         self._busy(True)
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
@@ -538,6 +584,8 @@ class OrganiserApp(ttk.Frame):
         self._fill_version_tree()
         self._fill_installer_tree()
         self.graph_view.set_data(built, groups)
+        if self.show_graph_after_scan and built.moves:
+            self.tabs.select(self.graph_view)
         self._busy(False)
 
         wasted = sum(group.wasted for group in groups)
@@ -1078,12 +1126,6 @@ def main() -> None:
     root.title("File Organiser")
     root.geometry("1040x700")
     root.minsize(860, 560)
-    style = ttk.Style()
-    try:
-        style.theme_use("vista")
-    except tk.TclError:
-        pass
-    style.configure("Treeview", rowheight=24)
     try:  # the app's own icon instead of Tk's feather, when Pillow is there
         from PIL import ImageTk
 

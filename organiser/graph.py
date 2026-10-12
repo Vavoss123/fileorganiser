@@ -2,7 +2,8 @@
 
 The scanned folder sits in the middle, destination folders branch off it, and
 each file is a dot tied to the folder it will move into. Copies of the same
-file are linked to each other.
+file are linked to each other. A folder can be folded, which hides the files
+and folders inside it behind the one dot.
 
 Pure data and arithmetic, no Tk, so it can be tested. :mod:`organiser.graphview`
 draws it.
@@ -13,11 +14,13 @@ from __future__ import annotations
 import math
 import os
 import random
+from collections import Counter
 from dataclasses import dataclass, field
 
 from .plan import Move, Plan
 
-#: Above this many files the graph shows folders only; Tk cannot animate more.
+#: Tk cannot animate many more files than this. Bigger scans start with their
+#: largest folders folded.
 MAX_FILE_NODES = 1000
 
 ALPHA_MIN = 0.005
@@ -39,6 +42,8 @@ class Node:
     size: int = 0
     count: int = 0            # files at or below a folder
     parent: int | None = None  # the folder above a folder
+    collapsed: bool = False   # a folded folder
+    hidden: int = 0           # files folded away inside it
     duplicate: bool = False
     x: float = 0.0
     y: float = 0.0
@@ -65,6 +70,7 @@ class Graph:
         self.edges: list[Edge] = []
         self.index: dict[str, int] = {}
         self.truncated = False
+        self.collapsed: set[str] = set()  # folder keys that are folded
         self._random = random.Random(seed)
 
     def add_node(self, node: Node, near: int | None = None, spread: float = 80.0) -> int:
@@ -92,7 +98,7 @@ class Graph:
         parent = self.index["root"]
         parts = [part for part in bucket.split("/") if part]
         for depth in range(len(parts)):
-            key = "folder:" + "/".join(parts[: depth + 1]).lower()
+            key = folder_key(parts[: depth + 1])
             if key not in self.index:
                 index = self.add_node(
                     Node(key=key, label=parts[depth], kind="folder", group=parts[0],
@@ -103,6 +109,26 @@ class Graph:
                 self.add_edge(parent, index, "tree")
             parent = self.index[key]
         return parent
+
+
+def folder_key(parts: list[str]) -> str:
+    return "folder:" + "/".join(parts).lower()
+
+
+def _parts(bucket: str | None) -> list[str]:
+    return [part for part in (bucket or "").split("/") if part]
+
+
+def auto_collapse(entries, max_files: int) -> set[str]:
+    """Fold the biggest top-level folders until at most *max_files* show."""
+    totals = Counter(folder_key(parts[:1]) for parts, *_rest in entries if parts)
+    shown, collapsed = len(entries), set()
+    for key, count in totals.most_common():
+        if shown <= max_files:
+            break
+        collapsed.add(key)
+        shown -= count
+    return collapsed
 
 
 def _file_weight(size: int) -> float:
@@ -127,21 +153,43 @@ def build_graph(
     show_in_place: bool = False,
     show_duplicates: bool = True,
     max_files: int = MAX_FILE_NODES,
+    collapsed: set[str] | None = None,
+    size_by: str = "count",
 ) -> Graph:
+    """Build the graph for *plan*.
+
+    *collapsed* holds the keys of folded folders; None folds the biggest ones
+    when there are more than *max_files* files. *size_by* is "count" (dots
+    grow with the number of files) or "space" (with the disk space they use).
+    """
     graph = Graph()
     root_name = os.path.basename(os.path.normpath(plan.root)) or plan.root
-    root = graph.add_node(Node(key="root", label=root_name, kind="root", group="", path=plan.root))
+    graph.add_node(Node(key="root", label=root_name, kind="root", group="", path=plan.root))
 
-    placed: list[tuple[int, object, str, Move | None]] = []  # (folder, info, edge kind, move)
+    entries: list[tuple[list[str], object, str, Move | None]] = []
     for move in plan.moves:
-        placed.append((graph.folder(move.bucket), move.info, "move", move))
+        entries.append((_parts(move.bucket), move.info, "move", move))
     if show_in_place:
         for info in plan.already_tidy:
-            relative = _relative_folder(info.path, plan.root)
-            folder = graph.folder(relative) if relative else root
-            placed.append((folder, info, "in-place", None))
+            entries.append((_parts(_relative_folder(info.path, plan.root)), info, "in-place", None))
 
-    for folder, info, _kind, _move in placed:
+    if collapsed is None:
+        collapsed = auto_collapse(entries, max_files) if show_files else set()
+    graph.collapsed = set(collapsed)
+
+    placed: list[tuple[int, object, str, Move | None]] = []  # (folder, info, edge kind, move)
+    for parts, info, kind, move in entries:
+        hidden = False
+        for depth in range(len(parts)):
+            if folder_key(parts[: depth + 1]) in graph.collapsed:
+                parts, hidden = parts[: depth + 1], True
+                break
+        folder = graph.folder("/".join(parts))
+        if hidden:
+            graph.nodes[folder].collapsed = True
+            graph.nodes[folder].hidden += 1
+        else:
+            placed.append((folder, info, kind, move))
         index: int | None = folder
         while index is not None:  # count the file against every folder above it
             graph.nodes[index].count += 1
@@ -158,7 +206,6 @@ def build_graph(
                     label=info.name,
                     kind="file",
                     group=graph.nodes[folder].group,
-                    weight=_file_weight(info.size),
                     path=info.path,
                     move=move,
                     size=info.size,
@@ -179,12 +226,26 @@ def build_graph(
                 for other in present[1:]:
                     graph.add_edge(present[0], other, "duplicate")
 
+    _set_weights(graph, size_by)
+    return graph
+
+
+def _set_weights(graph: Graph, size_by: str) -> None:
+    folders = [node for node in graph.nodes if node.kind == "folder"]
+    files = [node for node in graph.nodes if node.kind == "file"]
+    biggest_folder = max((node.size for node in folders), default=0) or 1
+    biggest_file = max((node.size for node in files), default=0) or 1
     for node in graph.nodes:
         if node.kind == "root":
             node.weight = 3.2
+        elif size_by == "space":
+            # Area, not width, follows the size, so a file twice as big looks it.
+            share = node.size / (biggest_folder if node.kind == "folder" else biggest_file)
+            node.weight = (1.2 + 3.8 * math.sqrt(share)) if node.kind == "folder"                 else (0.5 + 2.7 * math.sqrt(share))
         elif node.kind == "folder":
             node.weight = min(1.6 + math.sqrt(node.count) * 0.3, 5.0)
-    return graph
+        else:
+            node.weight = _file_weight(node.size)
 
 
 class Simulation:
