@@ -17,6 +17,7 @@ os.environ["LOCALAPPDATA"] = _APPDATA.name
 from organiser import apply as apply_module
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup
 from organiser import graph as graph_module
+from organiser import updates
 
 
 def write(folder: str, name: str, content: bytes = b"x") -> str:
@@ -571,6 +572,36 @@ class GraphTests(unittest.TestCase):
             if edge.kind == "move":
                 a, b = graph.nodes[edge.a], graph.nodes[edge.b]
                 self.assertLess(((a.x - b.x) ** 2 + (a.y - b.y) ** 2) ** 0.5, 400)
+
+
+class UpdateTests(unittest.TestCase):
+    def test_versions_compare_as_numbers(self):
+        self.assertTrue(updates.is_newer("v1.10", "1.9"))
+        self.assertTrue(updates.is_newer("v2.0", "1.9.9"))
+        self.assertFalse(updates.is_newer("v1.3", "1.3"))
+        self.assertFalse(updates.is_newer("v1.3.0", "1.3"))
+        self.assertFalse(updates.is_newer("v1.2", "1.3"))
+        self.assertTrue(updates.is_newer("v1.4-beta", "1.3"))
+        self.assertFalse(updates.is_newer("nightly", "1.3"))
+
+    def test_app_version_is_a_version(self):
+        self.assertIsNotNone(updates.parse_version(updates.__version__))
+
+
+class CancelTests(unittest.TestCase):
+    def test_a_progress_callback_can_stop_the_duplicate_check(self):
+        with tempfile.TemporaryDirectory() as root:
+            for index in range(30):
+                write(root, "copy{}.bin".format(index), b"same" * 1000)
+
+            class Stop(Exception):
+                pass
+
+            def stop(done, total):
+                raise Stop
+
+            with self.assertRaises(Stop):
+                duplicates.find_duplicates(scan.scan(root).files, progress=stop)
 
 
 if __name__ == "__main__":

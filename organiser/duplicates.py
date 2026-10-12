@@ -171,6 +171,8 @@ def find_duplicates(
                 except OSError as exc:
                     if unreadable is not None:
                         unreadable.append((info.path, str(exc)))
+                if progress:  # big files take a while; let the caller check in
+                    progress(done, total)
             for digest, full_group in by_full.items():
                 if len(full_group) > 1:
                     groups.append(DuplicateGroup(digest=digest, files=full_group))

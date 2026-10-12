@@ -3,7 +3,7 @@
 
 #define AppName "File Organiser"
 #ifndef AppVersion
-  #define AppVersion "1.2"
+  #define AppVersion "1.3"
 #endif
 #define AppExe "FileOrganiser.exe"
 

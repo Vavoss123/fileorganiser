@@ -20,6 +20,8 @@ DEFAULTS: dict = {
     "theme": "system",        # "system", "light" or "dark"
     "graph": {},              # the Map tab's panel settings
     "advanced": False,        # show "More options"
+    "welcomed": False,        # the welcome screen has been shown
+    "check_updates": True,    # ask GitHub for newer releases at start-up
 }
 
 

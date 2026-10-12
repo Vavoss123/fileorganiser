@@ -15,13 +15,14 @@ import subprocess
 import sys
 import threading
 import tkinter as tk
+import webbrowser
 from tkinter import filedialog, messagebox, ttk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
-from organiser import theme  # noqa: E402
+from organiser import theme, updates  # noqa: E402
 from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
@@ -32,6 +33,20 @@ STARTUP_CHOICES = {
     "tray": "Keep tidying from the tray",
 }
 PAD = 10
+
+#: Keyboard shortcuts, as shown in the welcome screen: (keys, what they do).
+SHORTCUTS = (
+    ("Ctrl+O", "Choose a folder"),
+    ("F5", "Scan the folder"),
+    ("Esc", "Stop a scan"),
+    ("Ctrl+Enter", "Tidy the ticked files"),
+    ("Ctrl+Z", "Undo a tidy"),
+    ("F1", "Show the welcome screen again"),
+)
+
+
+class ScanCancelled(Exception):
+    """Raised inside the scan thread when the user presses Cancel."""
 WINDOW_PAD = 18
 
 
@@ -167,12 +182,19 @@ class OrganiserApp(ttk.Frame):
             value=theme.CHOICES.get(self.settings.get("theme"), theme.CHOICES["system"])
         )
         self.show_graph_after_scan = False
+        self.cancel_scan_event = threading.Event()
+        self.updates_var = tk.BooleanVar(value=bool(self.settings.get("check_updates", True)))
         self.palette = theme.apply(master, theme.resolve(self.settings.get("theme", "system")))
 
         self.pack(fill="both", expand=True)
         self._build()
         self._colour_plain_widgets()
+        self._bind_shortcuts()
         self.after(100, self._drain_events)
+        if self.updates_var.get():
+            threading.Thread(target=self._update_worker, daemon=True).start()
+        if not self.settings.get("welcomed"):
+            self.after(400, self.show_welcome)
 
     # ------------------------------------------------------------------ layout
 
@@ -246,12 +268,49 @@ class OrganiserApp(ttk.Frame):
             header, style="Muted.TLabel",
             text="Sorts a messy folder into tidy ones. Nothing is deleted, "
                  "and you can undo every tidy.",
-        ).grid(row=1, column=1, sticky="w")
+        ).grid(row=1, column=1, columnspan=2, sticky="w")
 
-        look = ttk.Button(header, text="◐  Theme", style="Small.TButton")
+        right = ttk.Frame(header)
+        right.grid(row=0, column=2, sticky="ne")
+        self.update_link = ttk.Label(right, style="Link.TLabel", cursor="hand2")
+        help_button = ttk.Button(right, text="?  How it works", style="Small.TButton",
+                                 command=self.show_welcome)
+        help_button.pack(side="right")
+        Tooltip(help_button, "A quick tour of the app, and its keyboard shortcuts. (F1)")
+        look = ttk.Button(right, text="◐  Theme", style="Small.TButton")
         look.configure(command=lambda: self._theme_popup(look))
-        look.grid(row=0, column=2, rowspan=2, sticky="ne")
+        look.pack(side="right", padx=(0, 6))
         return header
+
+    def _update_worker(self) -> None:
+        found = updates.newer_release()
+        if found:
+            self.events.put(("update", found))
+
+    def _show_update(self, tag: str, url: str) -> None:
+        self.update_link.configure(text="✦ Version {} is out, get it here".format(
+            tag.lstrip("v")))
+        self.update_link.bind("<Button-1>", lambda _e: webbrowser.open(url))
+        self.update_link.pack(side="right", padx=(0, 14))
+        Tooltip(self.update_link, "Opens the download page on GitHub. You're on version "
+                                  "{}.".format(updates.__version__))
+
+    def show_welcome(self) -> None:
+        dialog = WelcomeDialog(self.master, self.palette)
+        self.master.wait_window(dialog)
+        if not self.settings.get("welcomed"):
+            self.settings["welcomed"] = True
+            config.save(self.current_settings())
+
+    def _bind_shortcuts(self) -> None:
+        root = self.master
+        root.bind("<Control-o>", lambda _e: self.browse())
+        root.bind("<Control-O>", lambda _e: self.browse())
+        root.bind("<F5>", lambda _e: self.start_scan(show_graph=True))
+        root.bind("<Escape>", lambda _e: self.cancel_scan())
+        root.bind("<Control-Return>", lambda _e: self.apply_plan())
+        root.bind("<Control-z>", lambda _e: self.undo_last())
+        root.bind("<F1>", lambda _e: self.show_welcome())
 
     def _theme_popup(self, button: ttk.Button) -> None:
         menu = tk.Menu(self, tearoff=False, **self._menu_colours())
@@ -352,6 +411,12 @@ class OrganiserApp(ttk.Frame):
         rules = ttk.Button(options, text="Custom rules…", command=self.edit_rules,
                            style="Small.TButton")
         rules.grid(row=3, column=0, columnspan=2, sticky="w", pady=(10, 0))
+        updates_box = ttk.Checkbutton(options, text="Tell me when there's a new version",
+                                      variable=self.updates_var, style="Card.TCheckbutton")
+        updates_box.grid(row=3, column=2, columnspan=2, sticky="w", pady=(10, 0),
+                         padx=(22, 0))
+        Tooltip(updates_box, "Once each time the app opens, ask GitHub whether a newer "
+                             "version is out. Nothing about you or your files is sent.")
         options.columnconfigure(5, weight=1)
         Tooltip(rules, "Choose your own folder for any file type, for example .pdf to "
                        "Documents/Receipts.")
@@ -670,6 +735,7 @@ class OrganiserApp(ttk.Frame):
             "theme": self._theme_choice(),
             "graph": self.graph_view.settings(),
             "advanced": bool(self.advanced_var.get()),
+            "check_updates": bool(self.updates_var.get()),
         })
         return settings
 
@@ -679,6 +745,8 @@ class OrganiserApp(ttk.Frame):
             self.progress.grid()
         else:
             self.progress.grid_remove()
+            self.scan_button.configure(text="Scan folder", style="Accent.TButton",
+                                       command=lambda: self.start_scan(show_graph=True))
         if busy:
             self.apply_button.configure(state="disabled")
             self.undo_button.configure(state="disabled")
@@ -701,7 +769,10 @@ class OrganiserApp(ttk.Frame):
         self.settings = self.current_settings()
         config.save(self.settings)
         self.show_graph_after_scan = show_graph
+        self.cancel_scan_event.clear()
         self._busy(True)
+        self.scan_button.configure(text="Stop scan", style="TButton", state="normal",
+                                   command=self.cancel_scan)
         self.progress.configure(mode="indeterminate")
         self.progress.start(12)
         self.status_var.set("Scanning {}…".format(folder))
@@ -711,26 +782,42 @@ class OrganiserApp(ttk.Frame):
         )
         self.worker.start()
 
+    def cancel_scan(self) -> None:
+        if self.worker and self.worker.is_alive() and self.scan_button.cget("text") == "Stop scan":
+            self.cancel_scan_event.set()
+            self.status_var.set("Stopping…")
+
     def _scan_worker(self, settings: dict) -> None:
+        def check() -> None:
+            if self.cancel_scan_event.is_set():
+                raise ScanCancelled
+
+        def found(count: int) -> None:
+            check()
+            self.events.put(("status", "Found {:,} files…".format(count)))
+
+        def compared(done: int, total: int) -> None:
+            check()
+            self.events.put(("progress", (done, total)))
+
         try:
-            result, built = auto.scan_and_plan(
-                settings,
-                progress=lambda n: self.events.put(("status", "Found {} files…".format(n))),
-            )
+            result, built = auto.scan_and_plan(settings, progress=found)
+            check()
             groups: list[duplicates.DuplicateGroup] = []
             if settings["find_duplicates"]:
                 self.events.put(("status", "Comparing files for duplicates…"))
                 groups = duplicates.find_duplicates(
-                    result.files,
-                    progress=lambda done, total: self.events.put(("progress", (done, total))),
-                    unreadable=built.unreadable,
+                    result.files, progress=compared, unreadable=built.unreadable,
                 )
+            check()
             versions = duplicates.find_possible_versions(result.files, groups)
             installers = cleanup.old_installers(
                 result.files + self._already_filed_installers(settings),
                 days=settings.get("installer_age_days", 30),
             )
             self.events.put(("scanned", (built, groups, versions, installers)))
+        except ScanCancelled:
+            self.events.put(("cancelled", None))
         except Exception as exc:  # a GUI should never die on an awkward folder
             self.events.put(("error", str(exc)))
 
@@ -758,6 +845,13 @@ class OrganiserApp(ttk.Frame):
                     self._show_results(*payload)
                 elif kind == "applied":
                     self._after_apply(payload)
+                elif kind == "cancelled":
+                    self.progress.stop()
+                    self._busy(False)
+                    self.status_var.set("Scan stopped. Nothing was changed.")
+                    self.log("Scan stopped by user")
+                elif kind == "update":
+                    self._show_update(*payload)
                 elif kind == "error":
                     self.progress.stop()
                     self.progress.configure(mode="determinate", value=0)
@@ -1159,7 +1253,7 @@ class OrganiserApp(ttk.Frame):
     # ------------------------------------------------------------------- apply
 
     def apply_plan(self) -> None:
-        if not self.plan or not self.plan.selected:
+        if not self.plan or not self.plan.selected or self._working():
             return
         moves = list(self.plan.selected)
         buckets = sorted({move.bucket for move in moves})
@@ -1206,7 +1300,13 @@ class OrganiserApp(ttk.Frame):
             )
         self.start_scan()
 
+    def _working(self) -> bool:
+        """True while a scan or a tidy is running (shortcuts skip the buttons' checks)."""
+        return bool(self.worker and self.worker.is_alive())
+
     def undo_last(self) -> None:
+        if self._working():
+            return
         history = apply_module.run_history()
         if not history:
             messagebox.showinfo("File Organiser", "There is nothing to undo.")
@@ -1225,6 +1325,75 @@ class OrganiserApp(ttk.Frame):
         if not apply_module.list_journals():
             self.undo_button.configure(state="disabled")
         self.start_scan()
+
+
+class WelcomeDialog(tk.Toplevel):
+    """A short tour for first-time users, also shown by "How it works"."""
+
+    STEPS = (
+        ("Choose a folder",
+         "Downloads is picked for you. You can choose any folder with Browse…, "
+         "or click a quick pick."),
+        ("Scan and have a look",
+         "Scan folder shows a map of where every file would go. Nothing moves yet. "
+         "Untick anything you'd rather leave where it is."),
+        ("Tidy",
+         "Tidy moves the files into neat folders. Changed your mind? Undo a tidy puts "
+         "them all back."),
+    )
+
+    def __init__(self, master: tk.Misc, palette: dict) -> None:
+        super().__init__(master)
+        self.title("Welcome to File Organiser")
+        self.transient(master)
+        self.resizable(False, False)
+        self.configure(background=palette["bg"])
+
+        page = ttk.Frame(self, padding=24)
+        page.pack(fill="both", expand=True)
+        ttk.Label(page, text="Tidy a messy folder in three steps",
+                  style="Title.TLabel").pack(anchor="w")
+        ttk.Label(page, style="Muted.TLabel",
+                  text="Nothing is ever deleted, and every tidy can be undone.").pack(
+            anchor="w", pady=(2, 16))
+
+        for number, (title, text) in enumerate(self.STEPS, start=1):
+            card = ttk.Frame(page, style="Card.TFrame", padding=(14, 12))
+            card.pack(fill="x", pady=(0, 10))
+            badge = tk.Canvas(card, width=34, height=34, highlightthickness=0,
+                              background=palette["surface"])
+            badge.create_oval(2, 2, 32, 32, fill=palette["accent"], outline="")
+            badge.create_text(17, 17, text=str(number), fill=palette["accent_text"],
+                              font=(theme.FAMILY, 12, "bold"))
+            badge.pack(side="left", padx=(0, 14), anchor="n")
+            words = ttk.Frame(card, style="CardBody.TFrame")
+            words.pack(side="left", fill="x", expand=True)
+            ttk.Label(words, text=title, style="CardHeading.TLabel").pack(anchor="w")
+            ttk.Label(words, text=text, style="Card.TLabel", wraplength=420,
+                      justify="left").pack(anchor="w", pady=(2, 0))
+
+        keys = ttk.Frame(page)
+        keys.pack(fill="x", pady=(6, 0))
+        ttk.Label(keys, text="Keyboard shortcuts", style="Muted.TLabel").grid(
+            row=0, column=0, columnspan=4, sticky="w", pady=(0, 4))
+        for index, (combo, what) in enumerate(SHORTCUTS):
+            row, column = divmod(index, 2)
+            ttk.Label(keys, text=combo, font=(theme.FAMILY, 9, "bold")).grid(
+                row=row + 1, column=column * 2, sticky="w", padx=(0, 8))
+            ttk.Label(keys, text=what, style="Muted.TLabel").grid(
+                row=row + 1, column=column * 2 + 1, sticky="w", padx=(0, 24))
+
+        start = ttk.Button(page, text="Get started", style="Accent.TButton",
+                           command=self.destroy)
+        start.pack(anchor="e", pady=(18, 0))
+        start.focus_set()
+        self.bind("<Return>", lambda _e: self.destroy())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry("+{}+{}".format(max(x, 0), max(y, 0)))
+        self.grab_set()
 
 
 class HistoryDialog(tk.Toplevel):

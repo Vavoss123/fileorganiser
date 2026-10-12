@@ -37,6 +37,15 @@ jobs:
         shell: pwsh
         run: '"APP_VERSION=${{ github.ref_name }}".Replace("=v", "=") >> $env:GITHUB_ENV'
 
+      - name: Check the tag matches the app's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $version = python -c "import organiser; print(organiser.__version__)"
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} doesn't match organiser/__init__.py ($version). Update __version__ first."
+          }
+
       - name: Build
         shell: cmd
         run: call build.bat

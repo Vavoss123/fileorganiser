@@ -99,6 +99,7 @@ def apply(root: tk.Tk, mode: str) -> dict:
     style.theme_use("clam")
     _base(style, c)
     _named(style, c)
+    _indicators(root, style, c, mode)
     root.configure(background=c["bg"])
     # Combobox drop-downs are plain Tk listboxes, styled through the option database.
     root.option_add("*TCombobox*Listbox.background", c["field"])
@@ -233,3 +234,80 @@ def _named(style: ttk.Style, c: dict) -> None:
     style.configure("Link.TLabel", foreground=c["accent"])
     style.configure("Tooltip.TLabel", background=c["text"], foreground=c["bg"],
                     padding=(8, 5), font=(FAMILY, 9))
+
+
+# Drawn tick boxes and radio dots. Clam's own are tiny crosses; these are a
+# rounded box with a real tick, and a ring with a dot. They need Pillow (always
+# in the built app); without it the clam ones stay.
+_images: dict[str, object] = {}
+
+
+def _indicator_images(root: tk.Misc, c: dict, kind: str) -> dict[str, object] | None:
+    try:
+        from PIL import Image, ImageDraw, ImageTk
+    except ImportError:
+        return None
+    size = max(14, round(16 * root.winfo_fpixels("1i") / 96))
+    gap = round(size * 0.5)  # space between the box and its label
+    scale = 4  # draw big, then shrink, for smooth edges
+
+    def rgb(colour: str) -> tuple[int, int, int]:
+        return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+    def draw(fill: str, outline: str, mark: str | None) -> object:
+        big = size * scale
+        image = Image.new("RGBA", ((size + gap) * scale, big), (0, 0, 0, 0))
+        pen = ImageDraw.Draw(image)
+        line = max(scale, round(big / 14))
+        box = (line // 2, line // 2, big - 1 - line // 2, big - 1 - line // 2)
+        if kind == "check":
+            pen.rounded_rectangle(box, radius=big // 5, fill=rgb(fill), outline=rgb(outline),
+                                  width=line)
+            if mark:
+                points = [(big * 0.26, big * 0.53), (big * 0.43, big * 0.70),
+                          (big * 0.75, big * 0.32)]
+                pen.line(points, fill=rgb(mark), width=round(big / 8), joint="curve")
+        else:
+            pen.ellipse(box, fill=rgb(fill), outline=rgb(outline), width=line)
+            if mark:
+                inset = big * 0.3
+                pen.ellipse((inset, inset, big - inset, big - inset), fill=rgb(mark))
+        small = image.resize((size + gap, size), Image.LANCZOS)
+        return ImageTk.PhotoImage(small, master=root)
+
+    on = c["accent"]
+    return {
+        "off": draw(c["field"], c["border"], None),
+        "off_hover": draw(c["field"], c["accent"], None),
+        "on": draw(on, on, c["accent_text"] if kind == "check" else c["accent_text"]),
+        "on_hover": draw(c["accent_hover"], c["accent_hover"], c["accent_text"]),
+        "disabled": draw(c["hover"], c["border"], None),
+        "on_disabled": draw(c["border"], c["border"], c["muted"]),
+    }
+
+
+def _indicators(root: tk.Misc, style: ttk.Style, c: dict, mode: str) -> None:
+    for widget, kind in (("Checkbutton", "check"), ("Radiobutton", "radio")):
+        name = "organiser.{}.{}".format(kind, mode)
+        if name not in _images:
+            images = _indicator_images(root, c, kind)
+            if images is None:
+                return
+            _images[name] = images
+            style.element_create(
+                name, "image", images["off"],
+                ("disabled", "selected", images["on_disabled"]),
+                ("disabled", images["disabled"]),
+                ("selected", "active", images["on_hover"]),
+                ("selected", images["on"]),
+                ("active", images["off_hover"]),
+                sticky="",
+            )
+        style.layout("T" + widget, [
+            (widget + ".padding", {"sticky": "nswe", "children": [
+                (name, {"side": "left", "sticky": ""}),
+                (widget + ".focus", {"side": "left", "sticky": "w", "children": [
+                    (widget + ".label", {"sticky": "nswe"}),
+                ]}),
+            ]}),
+        ])

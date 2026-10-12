@@ -68,8 +68,11 @@ run one Windows may show "Windows protected your PC". Click **More info**, then
 
 ## Quick start
 
-1. Open File Organiser. It starts with your Downloads folder selected.
-2. Press **Scan folder**. Nothing is changed yet.
+1. Open File Organiser. It starts with your Downloads folder selected. The
+   first time, a short welcome explains the three steps; **? How it works**
+   shows it again.
+2. Press **Scan folder**. Nothing is changed yet. On a big folder you can
+   press **Stop scan** (or Esc) at any time.
 3. Look at the map, or the **Files to move** list. Untick anything you want to
    leave alone.
 4. Press **Tidy**. The files are moved.
@@ -204,6 +207,25 @@ runs. **Send all to Recycle Bin** clears them out.
 Shown when **More options** is open. Everything the app did in this session: every move, anything it skipped and
 why, and anything it couldn't read.
 
+### Keyboard shortcuts
+
+| Keys | Does |
+| --- | --- |
+| Ctrl+O | Choose a folder |
+| F5 | Scan the folder |
+| Esc | Stop a scan |
+| Ctrl+Enter | Tidy the ticked files |
+| Ctrl+Z | Undo a tidy |
+| F1 | Show the welcome screen again |
+
+### Updates
+
+When a newer version is published on GitHub, a link saying so appears at the
+top of the window; click it to open the download page. The check is one
+request to GitHub's public releases page each time the app opens. Nothing
+about you or your files is sent. Turn it off with **Tell me when there's a
+new version** under **More options**.
+
 ### Undo
 
 **Undo a tidy…** lists every run that can still be undone, newest first. Pick one
@@ -306,6 +328,7 @@ A few settings have no control in the app. You can change them in
 | `settle_seconds` | `120` | Files changed more recently than this are left alone. |
 | `installer_age_days` | `30` | How old an installer must be to appear under Old installers. |
 | `overrides` | `{}` | Your custom rules, e.g. `{"pdf": "Documents/Receipts"}`. Easier to edit with **Custom rules…**. |
+| `welcomed` | `false` | Set back to `false` to see the welcome screen at the next start. |
 
 ## Command line
 
@@ -359,14 +382,20 @@ or by the `APP_VERSION` environment variable if it is set.
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) builds both
 `.exe` files on GitHub's Windows machines and attaches them to a release. To
-publish version 1.2:
+publish version 1.4:
 
-```
-git tag v1.2
-git push origin v1.2
-```
+1. Set `__version__ = "1.4"` in [`organiser/__init__.py`](organiser/__init__.py)
+   and commit it. The app compares this with the newest release to decide
+   whether to show the update notice.
+2. Tag and push:
 
-The tests run first; if they fail, nothing is published. The version in the
+   ```
+   git tag v1.4
+   git push origin master v1.4
+   ```
+
+The tests run first, and the tag must match `__version__`; if either check
+fails, nothing is published. The version in the
 tag is stamped on the installer. Running the workflow by hand from the
 **Actions** tab builds the files without releasing them; they appear under
 the run's **Artifacts**.
@@ -393,7 +422,8 @@ organiser/
   duplicates.py              finding duplicates and possible versions
   graph.py                   the plan as a graph, and its force layout
   graphview.py               the Map tab: drawing and interaction
-  theme.py                   the light and dark looks
+  theme.py                   the light and dark looks, tick boxes included
+  updates.py                 asking GitHub for a newer release
   cleanup.py                 Recycle Bin clear-outs, old installers
   recycle.py                 the Windows Recycle Bin call
   auto.py                    scan and plan in one step, the --auto run
