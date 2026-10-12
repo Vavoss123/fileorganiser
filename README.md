@@ -51,7 +51,10 @@ There are three ways to run it.
 | `FileOrganiser.exe` | Nothing | Running without installing, e.g. from a USB stick. |
 | `python app.py` | Python 3.10+ | Development. |
 
-Both `.exe` files are created in `dist\` by `build.bat` (see
+Download either `.exe` from the
+[Releases page](https://github.com/Vavoss123/fileorganiser/releases/latest).
+They are built automatically from this repository by GitHub Actions. You can
+also build them yourself with `build.bat` (see
 [Building from source](#building-from-source)).
 
 The installer installs for your user account only, so it doesn't ask for
@@ -316,7 +319,24 @@ builds `dist\FileOrganiser.exe`, and then, if Inno Setup is installed, builds
 `dist\FileOrganiserSetup.exe` from [`installer.iss`](installer.iss).
 
 Close the app before building, otherwise Windows won't let the old exe be
-replaced. The installer version number is set at the top of `installer.iss`.
+replaced. The installer version number is set at the top of `installer.iss`,
+or by the `APP_VERSION` environment variable if it is set.
+
+### Publishing a release
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds both
+`.exe` files on GitHub's Windows machines and attaches them to a release. To
+publish version 1.2:
+
+```
+git tag v1.2
+git push origin v1.2
+```
+
+The tests run first; if they fail, nothing is published. The version in the
+tag is stamped on the installer. Running the workflow by hand from the
+**Actions** tab builds the files without releasing them; they appear under
+the run's **Artifacts**.
 
 ## Tests
 
@@ -351,6 +371,7 @@ scripts/make_demo_folder.py  creates a messy folder to try the app on
 tests/test_organiser.py      tests
 build.bat                    builds the exe and installer
 installer.iss                Inno Setup installer script
+.github/workflows/release.yml builds and publishes releases on GitHub
 run.bat                      opens the app from source without a console
 ```
 

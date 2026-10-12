@@ -2,7 +2,9 @@
 ; Installs per user (no admin prompt) into %LOCALAPPDATA%\Programs.
 
 #define AppName "File Organiser"
-#define AppVersion "1.1"
+#ifndef AppVersion
+  #define AppVersion "1.1"
+#endif
 #define AppExe "FileOrganiser.exe"
 
 [Setup]

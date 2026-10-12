@@ -16,7 +16,12 @@ for %%P in ("%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Set
     if exist %%P set "ISCC=%%~P"
 )
 if defined ISCC (
-    "%ISCC%" /Q installer.iss || goto :fail
+    rem APP_VERSION, when set (the release workflow sets it from the tag), stamps the installer.
+    if defined APP_VERSION (
+        "%ISCC%" /Q "/DAppVersion=%APP_VERSION%" installer.iss || goto :fail
+    ) else (
+        "%ISCC%" /Q installer.iss || goto :fail
+    )
     echo Installer: dist\FileOrganiserSetup.exe
 ) else (
     echo Inno Setup not found - skipped the installer. dist\FileOrganiser.exe is ready.

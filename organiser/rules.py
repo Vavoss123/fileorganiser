@@ -160,7 +160,7 @@ def clean_rule(extension: str, folder: str) -> tuple[str, str]:
     must stay inside the scanned folder: no drive letters, no ``..``.
     """
     ext = extension.strip().lstrip(".").lower()
-    if not ext or any(c in ext for c in ' /\.' ) or any(c in _BAD_FOLDER_CHARS for c in ext):
+    if not ext or any(c in ext for c in " /\\.") or any(c in _BAD_FOLDER_CHARS for c in ext):
         raise ValueError("Type an extension such as pdf or .blend")
     parts = [part.strip() for part in folder.replace("\\", "/").split("/")]
     parts = [part for part in parts if part]
