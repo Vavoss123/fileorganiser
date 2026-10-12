@@ -19,6 +19,12 @@ run.bat                 # double-click, or
 python app.py           # same thing with a console attached
 ```
 
+To build a standalone `dist\FileOrganiser.exe` (no Python needed to run it):
+
+```
+build.bat
+```
+
 To try it without touching your real files:
 
 ```
