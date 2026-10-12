@@ -2,15 +2,15 @@
 Obsidian's graph view.
 
 Scroll to zoom, drag the background to pan, drag a dot to pull it about.
-Hovering a dot lights up what it is linked to. Right-click a file to include
-or skip it; double-click a folder to fold or unfold it, or a file to show it
-in Explorer. "Before / after" plays the plan: every file starts loose in the
+Hovering a dot lights up what it is linked to. Double-click a file to open
+it, or a folder to fold or unfold it; right-click anything for a menu. "Before / after" plays the plan: every file starts loose in the
 folder being tidied, then flies to where it is going.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import time
 import tkinter as tk
 from tkinter import ttk
@@ -89,12 +89,14 @@ class GraphView(ttk.Frame):
         master: tk.Misc,
         on_toggle: Callable[[Move], None] | None = None,
         on_reveal: Callable[[str], None] | None = None,
+        on_open: Callable[[str], None] | None = None,
         settings: dict | None = None,
         mode: str = "dark",
     ) -> None:
         super().__init__(master)
         self.on_toggle = on_toggle
         self.on_reveal = on_reveal
+        self.on_open = on_open
         self.mode = mode
         self.c = PALETTES[mode]
         self.plan = None
@@ -172,8 +174,8 @@ class GraphView(ttk.Frame):
                                                tags="chrome")
         self.hint = self.canvas.create_text(
             14, 0, anchor="sw", font=FONT, tags="chrome",
-            text="Scroll to zoom · drag to pan · right-click a file to include or skip it · "
-                 "double-click a folder to fold it, or a file to show it in Explorer",
+            text="Scroll to zoom · drag to pan · double-click a file to open it, or a folder "
+                 "to fold it · right-click for more",
         )
         self.empty = self.canvas.create_text(0, 0, font=("Segoe UI", 11),
                                              text="Scan a folder to see its graph.")
@@ -222,6 +224,11 @@ class GraphView(ttk.Frame):
         self.canvas.itemconfigure(self.caption, fill=c["text"])
         self.canvas.itemconfigure(self.hint, fill=c["muted"])
         self.canvas.itemconfigure(self.empty, fill=c["muted"])
+        self.menu_colours = {
+            "background": c["button"], "foreground": c["text"],
+            "activebackground": blend(c["button"], c["accent"], 0.45),
+            "activeforeground": c["text"], "borderwidth": 0,
+        } if mode == "dark" else {}
         panel_bg = ttk.Style().lookup("TFrame", "background") or "SystemButtonFace"
         self.panel_holder.configure(background=panel_bg)
         self.label_state = [None] * len(self.label_items)
@@ -826,20 +833,47 @@ class GraphView(ttk.Frame):
             return
         node = self.graph.nodes[index]
         if node.kind == "folder":
-            self.collapsed ^= {node.key}
-            self._rebuild()
-        elif node.kind == "file" and self.on_reveal and node.path:
-            self.on_reveal(node.path)
+            self._fold(index)
+        elif node.path and self.on_open:
+            self.on_open(node.path)  # a file opens; the root opens in Explorer
 
-    def _on_right_click(self, event) -> None:
-        index = self.node_at(event.x, event.y)
-        if index is None:
-            return
+    def _fold(self, index: int) -> None:
+        self.collapsed ^= {self.graph.nodes[index].key}
+        self._rebuild()
+
+    def _toggle_include(self, index: int) -> None:
         node = self.graph.nodes[index]
         if node.move is not None and self.on_toggle:
             self.on_toggle(node.move)
             self._set_info(self._describe(index))
             self.restyle()
+
+    def _on_right_click(self, event) -> None:
+        index = self.node_at(event.x, event.y)
+        if index is None or self.tween is not None:
+            return
+        node = self.graph.nodes[index]
+        path = node.path
+        menu = tk.Menu(self, tearoff=False, **self.menu_colours)
+
+        def command(label: str, action, enabled: bool = True) -> None:
+            menu.add_command(label=label, command=action,
+                             state="normal" if enabled else "disabled")
+
+        if node.kind == "file":
+            command("Open", lambda: self.on_open and self.on_open(path))
+            command("Show in Explorer", lambda: self.on_reveal and self.on_reveal(path))
+            if node.move is not None:
+                menu.add_separator()
+                command("Skip this file" if node.move.include else "Include this file",
+                        lambda: self._toggle_include(index))
+        else:
+            exists = bool(path) and os.path.isdir(path)
+            command("Open folder" if exists or not path else "Open folder (made when you apply)",
+                    lambda: self.on_open and self.on_open(path), exists)
+            if node.kind == "folder":
+                command("Unfold" if node.collapsed else "Fold", lambda: self._fold(index))
+        menu.tk_popup(event.x_root, event.y_root)
 
     def _on_wheel(self, event) -> None:
         self._zoom_at(event.x, event.y, 1.1 ** (event.delta / 120))

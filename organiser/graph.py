@@ -180,11 +180,21 @@ def build_graph(
     placed: list[tuple[int, object, str, Move | None]] = []  # (folder, info, edge kind, move)
     for parts, info, kind, move in entries:
         hidden = False
+        where = move.destination_folder if move else os.path.dirname(info.path)
         for depth in range(len(parts)):
             if folder_key(parts[: depth + 1]) in graph.collapsed:
+                for _ in range(len(parts) - depth - 1):  # the folded folder's own path
+                    where = os.path.dirname(where)
                 parts, hidden = parts[: depth + 1], True
                 break
         folder = graph.folder("/".join(parts))
+        # Fill in this folder's path and its parents'. They may not exist on disk
+        # until the moves are applied.
+        index = folder
+        while graph.nodes[index].kind == "folder" and graph.nodes[index].path is None:
+            graph.nodes[index].path = where
+            where = os.path.dirname(where)
+            index = graph.nodes[index].parent
         if hidden:
             graph.nodes[folder].collapsed = True
             graph.nodes[folder].hidden += 1

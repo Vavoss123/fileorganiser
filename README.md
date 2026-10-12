@@ -108,8 +108,12 @@ remembers the folder and all options for next time.
 
 Lists every file that will move, grouped by destination folder. Click the tick
 in the **Move** column (or press Space) to include or exclude a file. Unticking
-a group heading unticks everything in it. Double-click a file to show it in
-Explorer.
+a group heading unticks everything in it.
+
+In this tab and the Duplicates, Possible versions and Old installers tabs,
+double-click a file (or press Enter) to open it in its usual program.
+Right-click a file for **Open**, **Show in Explorer** and **Open containing
+folder**.
 
 If a file with the same name already exists at the destination, the incoming
 file is renamed to `name (2).ext`. The new name is shown in the plan. Existing
@@ -129,12 +133,14 @@ scan finds something to move.
   Nothing moves on disk.
 - Scroll to zoom, drag the background to pan, and drag a dot to pull it about.
 - Hover a dot to light up what it is linked to. Click it to see its details.
-- Right-click a file to include or skip it. This also updates the Plan tab.
-  Skipped files are drawn hollow.
+- Double-click a file to open it in its usual program.
+- Right-click a file for **Open**, **Show in Explorer**, and **Skip** or
+  **Include**. Skipping also unticks it in the Plan tab, and skipped files are
+  drawn hollow. Right-click a folder to open it in Explorer (once it exists)
+  or to fold it.
 - Double-click a folder to fold its files away into it, and again to unfold
   it. Folded folders wear a ring and show how many files they hold. Scans
   with more than 1,000 files start with their biggest folders folded.
-- Double-click a file to show it in Explorer.
 
 The panel on the right (hide it with the gear button) has:
 

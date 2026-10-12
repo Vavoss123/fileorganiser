@@ -73,6 +73,27 @@ def reveal(path: str) -> None:
         pass
 
 
+def open_path(path: str, parent: tk.Misc | None = None) -> None:
+    """Open a file in its usual program, or a folder in Explorer."""
+    if not os.path.exists(path):
+        messagebox.showinfo(
+            "File Organiser",
+            "This isn't there any more:\n{}\n\nIt may have been moved or deleted since "
+            "the scan. Press Scan to refresh.".format(path),
+            parent=parent,
+        )
+        return
+    try:
+        if sys.platform == "win32":
+            os.startfile(path)  # noqa: S606 - opening the user's own file is the point
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+    except OSError as exc:
+        messagebox.showerror("File Organiser", "Couldn't open it:\n{}".format(exc), parent=parent)
+
+
 class OrganiserApp(ttk.Frame):
     def __init__(self, master: tk.Tk) -> None:
         super().__init__(master, padding=PAD)
@@ -190,6 +211,7 @@ class OrganiserApp(ttk.Frame):
         self.tabs.add(self._build_plan_tab(), text="Plan")
         self.graph_view = GraphView(
             self, on_toggle=self._toggle_move, on_reveal=reveal,
+            on_open=lambda path: open_path(path, self),
             settings=self.settings.get("graph"),
             mode=theme.resolve(self.settings.get("theme", "system")),
         )
@@ -259,7 +281,7 @@ class OrganiserApp(ttk.Frame):
         frame.grid(row=1, column=0, sticky="nsew")
         self.plan_tree.bind("<Button-1>", self._on_plan_click)
         self.plan_tree.bind("<space>", lambda _e: self._toggle(self.plan_tree.focus()))
-        self.plan_tree.bind("<Double-1>", lambda _e: self._reveal_plan_selection())
+        self._bind_open(self.plan_tree)
         self.plan_tree.tag_configure("bucket", font=("Segoe UI", 9, "bold"))
         return page
 
@@ -300,7 +322,7 @@ class OrganiserApp(ttk.Frame):
             (120, 80, 145, 190),
         )
         frame.grid(row=2, column=0, sticky="nsew")
-        self.duplicate_tree.bind("<Double-1>", lambda _e: self._reveal_duplicate_selection())
+        self._bind_open(self.duplicate_tree)
         self.duplicate_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
         return page
 
@@ -330,7 +352,7 @@ class OrganiserApp(ttk.Frame):
             (120, 80, 145, 190),
         )
         frame.grid(row=2, column=0, sticky="nsew")
-        self.version_tree.bind("<Double-1>", lambda _e: self._reveal_version_selection())
+        self._bind_open(self.version_tree)
         self.version_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
         return page
 
@@ -367,7 +389,7 @@ class OrganiserApp(ttk.Frame):
             (80, 145, 260),
         )
         frame.grid(row=2, column=0, sticky="nsew")
-        self.installer_tree.bind("<Double-1>", lambda _e: self._reveal_installer_selection())
+        self._bind_open(self.installer_tree)
         return page
 
     def _build_log_tab(self) -> ttk.Frame:
@@ -811,6 +833,53 @@ class OrganiserApp(ttk.Frame):
             move = self.move_for_item.get(item)
             return move.source if move else None
         return self.path_for_item.get(item)
+
+    def _bind_open(self, tree: ttk.Treeview) -> None:
+        """Double-click or Enter opens a file; right-click offers a menu."""
+
+        def on_double(event) -> None:
+            # In the Plan tab, double-clicking the tick box only ticks it.
+            if tree is self.plan_tree and tree.identify_column(event.x) == "#1":
+                return
+            self._open_selection(tree)
+
+        tree.bind("<Double-1>", on_double)
+        tree.bind("<Return>", lambda _e: self._open_selection(tree))
+        tree.bind("<Button-3>", lambda e: self._tree_menu(tree, e))
+
+    def _open_selection(self, tree: ttk.Treeview) -> None:
+        path = self._selected_path(tree)
+        if path:
+            open_path(path, self)
+
+    def _tree_menu(self, tree: ttk.Treeview, event) -> None:
+        item = tree.identify_row(event.y)
+        if not item:
+            return
+        tree.selection_set(item)
+        tree.focus(item)
+        path = self._selected_path(tree)
+        if not path:
+            return
+        menu = tk.Menu(self, tearoff=False, **self._menu_colours())
+        menu.add_command(label="Open", command=lambda: open_path(path, self))
+        menu.add_command(label="Show in Explorer", command=lambda: reveal(path))
+        menu.add_command(label="Open containing folder",
+                         command=lambda: open_path(os.path.dirname(path), self))
+        if tree is self.plan_tree:
+            move = self.move_for_item.get(item)
+            menu.add_separator()
+            menu.add_command(label="Skip this file" if move.include else "Include this file",
+                             command=lambda: self._toggle(item))
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _menu_colours(self) -> dict:
+        palette = self.palette
+        if palette is theme.DARK:
+            return {"background": palette["surface"], "foreground": palette["text"],
+                    "activebackground": palette["select"], "activeforeground": "#ffffff",
+                    "borderwidth": 0}
+        return {}
 
     def _reveal_plan_selection(self) -> None:
         path = self._selected_path(self.plan_tree)

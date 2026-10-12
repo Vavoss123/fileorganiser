@@ -539,6 +539,15 @@ class GraphTests(unittest.TestCase):
         self.assertIn("folder:pictures/raw", opened.index)
         self.assertEqual(sum(n.kind == "file" for n in opened.nodes), 2)
 
+    def test_folders_know_where_they_are_on_disk(self):
+        write(self.root, "shot.dng", b"raw")
+        graph = self.graph_for(collapsed=set())
+        raw = graph.nodes[graph.index["folder:pictures/raw"]]
+        self.assertEqual(raw.path, os.path.join(self.root, "Pictures", "Raw"))
+        folded = self.graph_for(collapsed={"folder:pictures"})
+        self.assertEqual(folded.nodes[folded.index["folder:pictures"]].path,
+                         os.path.join(self.root, "Pictures"))
+
     def test_size_by_space_makes_big_files_bigger(self):
         write(self.root, "big.zip", b"x" * 100000)
         write(self.root, "small.zip", b"x")
