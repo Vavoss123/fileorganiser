@@ -1,124 +1,301 @@
 # File Organiser
 
-A small Windows desktop app that tidies a cluttered folder — Downloads, usually.
-It sorts files into sensible folders (pictures with pictures, videos with
-videos), gives application project files a home of their own (`Apps/Blender`,
-`Apps/Photoshop`, …), and points out duplicates you could delete.
+A Windows desktop app that tidies a cluttered folder, usually Downloads.
 
-Nothing happens until you say so. A scan only reads; files move when you press
-**Apply**, and that run can be undone. **The app never deletes anything** —
-duplicates are reported for you to act on.
+It sorts files into folders by type (pictures, videos, documents and so on),
+gives project files from specific programs their own folder (`Apps/Blender`,
+`Apps/Photoshop` and about 50 more), finds duplicate files, and flags old
+installers you probably no longer need.
 
-## Running it
+You always see a plan before anything happens, every run can be undone, and
+nothing is ever permanently deleted.
 
-Needs Python 3.10+ with tkinter, which the standard python.org installer
-includes. No packages to install.
+## Contents
 
-```
-run.bat                 # double-click, or
-python app.py           # same thing with a console attached
-```
+- [Features](#features)
+- [Installing](#installing)
+- [Quick start](#quick-start)
+- [Using the app](#using-the-app)
+- [Where files go](#where-files-go)
+- [Automatic tidying](#automatic-tidying)
+- [Safety](#safety)
+- [Settings and data](#settings-and-data)
+- [Command line](#command-line)
+- [Building from source](#building-from-source)
+- [Tests](#tests)
+- [Project layout](#project-layout)
+- [Troubleshooting](#troubleshooting)
+- [Uninstalling](#uninstalling)
 
-To build a standalone `dist\FileOrganiser.exe` (no Python needed to run it):
+## Features
 
-```
-build.bat
-```
+- Sorts files into about 20 type folders and 50 application folders.
+- Shows the full plan first. Untick anything you want left where it is.
+- Undo any past run, even one that was interrupted by a crash.
+- Finds exact duplicates (same content, any name) and sends the extra copies
+  to the Recycle Bin.
+- Points out files that look like different versions of the same thing, such
+  as `essay.docx` and `essay (1).docx`.
+- Flags installers that haven't been touched for 30 days.
+- Your own rules, for example `.pdf` to `Documents/Receipts`.
+- Optional year or month folders for photos and videos.
+- Can tidy automatically when you sign in, or keep tidying from the system tray.
 
-To try it without touching your real files:
+## Installing
+
+There are three ways to run it.
+
+| Option | What you need | Best for |
+| --- | --- | --- |
+| `FileOrganiserSetup.exe` | Nothing | Normal use. Adds a Start Menu shortcut and an uninstall entry. |
+| `FileOrganiser.exe` | Nothing | Running without installing, e.g. from a USB stick. |
+| `python app.py` | Python 3.10+ | Development. |
+
+Both `.exe` files are created in `dist\` by `build.bat` (see
+[Building from source](#building-from-source)).
+
+The installer installs for your user account only, so it doesn't ask for
+administrator rights. It goes to `%LOCALAPPDATA%\Programs\File Organiser`.
+
+**Windows SmartScreen:** the files aren't code-signed, so the first time you
+run one Windows may show "Windows protected your PC". Click **More info**, then
+**Run anyway**.
+
+## Quick start
+
+1. Open File Organiser. It starts with your Downloads folder selected.
+2. Press **Scan**. Nothing is changed yet.
+3. Look through the **Plan** tab. Untick anything you want to leave alone.
+4. Press **Apply**. The files are moved.
+5. Changed your mind? Press **Undo…** and pick the run.
+
+To try it without touching your own files, create a demo folder:
 
 ```
 python scripts\make_demo_folder.py
 ```
 
-That writes ~40 believably messy files (including two CVs with identical
-content under different names) to `%TEMP%\fileorganiser-demo`. Point the app at
-that folder and press **Scan**.
+This creates about 40 messy files in `%TEMP%\fileorganiser-demo`, including
+duplicates, versions of the same essay, an unfinished download and old
+installers. Point the app at that folder and press **Scan**.
 
-## How it works
+## Using the app
 
-**Scan** walks the folder, decides a destination for every file, and shows you
-the plan grouped by destination. Untick anything you want left alone — ticking
-a group heading toggles everything under it.
+### Choosing a folder
 
-Three things are deliberately left out of the plan:
+Type a path or press **Browse…**, then press **Scan** (or Enter). The app
+remembers the folder and all options for next time.
 
-- half-finished downloads (`.crdownload`, `.part`, `.tmp`) and OS clutter
-  (`Thumbs.db`, `~$draft.docx`),
-- folders the organiser itself creates, so a second run on a tidy folder finds
-  nothing to do,
-- subfolders, unless you raise **Look into subfolders** above 0.
+### Options
 
-**Apply** moves the ticked files. If a file with that name is already at the
-destination, the incoming one becomes `name (2).ext` — an existing file is
-never overwritten. Every run writes a journal to
-`%LOCALAPPDATA%\FileOrganiser\journal\`, and **Undo last run** replays it
-backwards, removing any folders it created along the way.
-
-### Where files go
-
-| Bucket | Examples |
+| Option | What it does |
 | --- | --- |
-| `Pictures`, `Pictures/Raw`, `Pictures/Vector`, `Pictures/Screenshots` | jpg, png, heic · cr2, dng · svg · `Screenshot …` |
-| `Videos`, `Audio` | mp4, mkv, mov · mp3, flac, wav |
-| `Documents` + `/Spreadsheets`, `/Presentations`, `/Ebooks` | pdf, docx, txt · xlsx, csv · pptx · epub |
-| `Apps/<Application>` | `.blend` → Blender, `.psd` → Photoshop, `.flp` → FL Studio, `.unitypackage` → Unity, ~50 more |
+| Look into subfolders | How many levels of subfolders to include. 0 means only the files directly in the folder. Folders the app created itself are always skipped. |
+| Send photos, videos and documents to my user libraries | Moves pictures to `~\Pictures`, videos to `~\Videos`, audio to `~\Music` and documents to `~\Documents` instead of subfolders of the scanned folder. Everything else stays in the scanned folder. |
+| Put unrecognised files in 'Other' | Off leaves files with unknown extensions where they are. |
+| Look for duplicates | Compares file contents. Turn off to make scans of huge folders faster. |
+| Date folders for photos and videos | Off, by year (`Pictures/2026`) or by year and month (`Pictures/2026/10`). Uses the date each file was last modified. |
+| When I sign in | Do nothing, tidy once, or keep tidying from the tray. See [Automatic tidying](#automatic-tidying). |
+| Custom rules… | Choose your own folder for any file type. See below. |
+
+### Plan tab
+
+Lists every file that will move, grouped by destination folder. Click the tick
+in the **Move** column (or press Space) to include or exclude a file. Unticking
+a group heading unticks everything in it. Double-click a file to show it in
+Explorer.
+
+If a file with the same name already exists at the destination, the incoming
+file is renamed to `name (2).ext`. The new name is shown in the plan. Existing
+files are never overwritten.
+
+### Duplicates tab
+
+Groups of files with exactly the same content, whatever their names. For
+example, `victor cv 1.pdf` and `victor stokoe cv.pdf` are found as long as the
+bytes match.
+
+In each group one file is marked **keep this one**. It's the copy without a
+`copy` or `(1)` marker in its name, and if there's a tie, the oldest. The others
+are marked **safe to delete**.
+
+- **Send duplicates to Recycle Bin** moves all the "safe to delete" copies to
+  the Recycle Bin. Each file is checked again first. If the file being kept,
+  or the copy, has changed since the scan, it's left alone.
+- **Copy suggested deletions** copies their paths to the clipboard instead, if
+  you'd rather deal with them yourself.
+
+To keep scans fast, files are compared by size first, then by the first 64 KB,
+and only read in full when those match.
+
+### Possible versions tab
+
+Files whose names look like versions of the same thing but whose contents
+differ, for example `essay.docx`, `essay (1).docx` and `essay_final.docx`. The
+newest is listed first. This tab is only for information: the app doesn't act
+on it. Names with dates or times in them (such as screenshots) aren't grouped
+together.
+
+### Old installers tab
+
+Installers (`.exe`, `.msi`, `.msix` and similar) that haven't been modified for
+30 days or more. It also looks inside the `Installers` folder from previous
+runs. **Send all to Recycle Bin** clears them out.
+
+### Log tab
+
+Everything the app did in this session: every move, anything it skipped and
+why, and anything it couldn't read.
+
+### Undo
+
+**Undo…** lists every run that can still be undone, newest first. Pick one
+and the files go back where they came from. Any folders the run created are
+removed if they're now empty. Files you've moved or renamed since then are
+left where they are, and the log says so.
+
+### Custom rules
+
+**Custom rules…** opens a list of your own extension-to-folder rules. Type an
+extension (`pdf` or `.pdf`) and a folder (`Documents/Receipts`), then press
+**Add / update** and **Save**. Your rules take priority over the built-in ones.
+Folders are always inside the folder being tidied. Drive letters and `..` are
+not allowed.
+
+## Where files go
+
+| Folder | Examples |
+| --- | --- |
+| `Pictures` | jpg, png, gif, webp, heic |
+| `Pictures/Screenshots` | images whose names start with `Screenshot`, `Capture` or `Snip` |
+| `Pictures/Raw`, `Pictures/Vector` | cr2, nef, dng · svg |
+| `Videos` | mp4, mkv, mov, avi, webm |
+| `Audio` | mp3, flac, wav, m4a, ogg |
+| `Documents` | pdf, docx, txt, md, rtf |
+| `Documents/Spreadsheets`, `/Presentations`, `/Ebooks` | xlsx, csv · pptx · epub, mobi |
+| `Archives` | zip, rar, 7z, tar, gz |
+| `Installers` | exe, msi, msix, appx |
+| `Disk Images` | iso, img, vhd, dmg |
+| `Code`, `Code/Data`, `Code/Web`, `Code/Notebooks` | py, js, cs · json, yaml · html, css · ipynb |
+| `Fonts`, `Torrents`, `Shortcuts` | ttf, otf · torrent · lnk, url |
 | `3D/Models`, `3D/Printing` | stl, obj, fbx · gcode, 3mf |
-| `Archives`, `Installers`, `Disk Images`, `Fonts`, `Torrents` | zip, 7z · exe, msi · iso · ttf · torrent |
-| `Code` + `/Data`, `/Web`, `/Notebooks` | py, cs, rs · json, yaml · html, css · ipynb |
-| `Other` | anything unrecognised (switchable off) |
+| `Apps/<program>` | `.blend` to Blender, `.psd` to Photoshop, `.flp` to FL Studio, `.unitypackage` to Unity, `.kdenlive` to Kdenlive, and about 50 more |
+| `Other` | anything not recognised (can be turned off) |
 
-Tick **Send photos, videos and documents to my user libraries** to route media
-and documents to `~\Pictures`, `~\Videos`, `~\Music` and `~\Documents` instead
-of into subfolders of the scanned folder. Application files always stay next to
-where they were found.
+The app always leaves these alone:
 
-The full mapping lives in [`organiser/rules.py`](organiser/rules.py) — one
-table per rule kind, easy to extend.
+- Unfinished downloads: `.crdownload`, `.part`, `.partial`, `.tmp` and similar.
+- System files: `desktop.ini`, `Thumbs.db`, and Office lock files like `~$report.docx`.
+- Any file changed in the last 2 minutes, because some browsers save straight
+  to the final name while still downloading.
+- Hidden folders (names starting with `.`).
 
-### Duplicates, and near-duplicates
+The complete list of rules is in [`organiser/rules.py`](organiser/rules.py).
 
-Two separate signals, kept apart on purpose:
+## Automatic tidying
 
-- **Duplicates** — byte-identical, proven with SHA-256. This is what catches
-  `victor cv 1.pdf` and `victor stokoe cv.pdf`: the names differ, the bytes do
-  not. The comparison is cheap first and thorough only where it has to be —
-  group by size, then hash the first 64 KiB, then hash in full — so most files
-  are never read end to end. The copy the app suggests keeping is the one whose
-  name carries no `copy`/`(1)` marker, oldest first as a tie-break. **Copy
-  suggested deletions** puts the rest on your clipboard.
-- **Possible versions** — names that normalise to the same thing but hold
-  different content, e.g. `essay.docx` and `essay (1).docx`. A hint for a human
-  and nothing more. Timestamped names are left distinct, so two screenshots
-  taken minutes apart are not mistaken for versions of each other.
+The **When I sign in** option has three settings.
 
-## Layout
+| Setting | What happens |
+| --- | --- |
+| Do nothing | The default. The app only runs when you open it. |
+| Tidy once | Each time you sign in to Windows, one tidy runs in the background using your saved options. No window opens. |
+| Keep tidying from the tray | An icon sits in the notification area and tidies every minute. New downloads are filed once they've been unchanged for 2 minutes. A notification tells you when files were moved. |
+
+The tray icon's right-click menu has **Open File Organiser**, **Tidy now**,
+**Keep tidying** (untick to pause) and **Quit**. Only one tray icon can run at
+a time.
+
+Things to know:
+
+- Automatic runs use the options you last saved in the app, including custom
+  rules and date folders.
+- They only move files. They never send anything to the Recycle Bin.
+- Each automatic run appears under **Undo…** like any other.
+- What they did is written to `%LOCALAPPDATA%\FileOrganiser\auto.log`.
+- The setting is a normal Windows startup entry, so you can also turn it off in
+  Task Manager under **Startup apps**.
+- The tray option only appears if the app was built with tray support (the
+  `.exe` files always are).
+
+## Safety
+
+- **Nothing happens without a plan.** Scanning only reads files.
+- **Nothing is overwritten.** Name clashes get a `(2)`, `(3)` suffix.
+- **Nothing is permanently deleted.** The only removal is to the Recycle Bin,
+  and only when you press one of the Recycle Bin buttons. If a file is too big
+  for the Recycle Bin, Windows asks you before deleting it.
+- **Every run can be undone.** The undo record is saved after every single
+  file moves, so even a run cut short by a crash or power cut can be undone up
+  to the last file that moved.
+- **Files are re-checked before recycling.** A duplicate is only removed if it
+  still matches the copy being kept.
+
+## Settings and data
+
+Everything is stored in `%LOCALAPPDATA%\FileOrganiser\`:
+
+| Path | Contents |
+| --- | --- |
+| `settings.json` | Your folder and options. |
+| `journal\*.jsonl` | One undo record per run. Undone runs are renamed to `.undone`. Older versions used `.json`; these can still be undone. |
+| `auto.log` | Log of automatic and tray runs. Starts afresh after 1 MB, keeping one `auto.log.old`. |
+
+A few settings have no control in the app. You can change them in
+`settings.json` while the app is closed:
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `settle_seconds` | `120` | Files changed more recently than this are left alone. |
+| `installer_age_days` | `30` | How old an installer must be to appear under Old installers. |
+| `overrides` | `{}` | Your custom rules, e.g. `{"pdf": "Documents/Receipts"}`. Easier to edit with **Custom rules…**. |
+
+## Command line
 
 ```
-app.py                     tkinter window: plan, duplicates, versions, log
-organiser/rules.py         extension → folder, and what to leave alone
-organiser/scan.py          walking a folder, collecting sizes and times
-organiser/plan.py          proposed moves, name-clash resolution
-organiser/duplicates.py    hashing, grouping, name normalisation
-organiser/apply.py         carrying out a plan, journalling, undo
-organiser/config.py        settings and journal locations
-scripts/make_demo_folder.py
-tests/test_organiser.py    27 tests, engine only, no GUI needed
+FileOrganiser.exe            open the window
+FileOrganiser.exe --auto     tidy once with saved settings, no window, then exit
+FileOrganiser.exe --tray     start the tray icon
 ```
 
-The engine knows nothing about tkinter, so it is usable from a script or a
-scheduled task as well:
+When running from source, use `python app.py` with the same flags.
+`run.bat` opens the window without a console.
+
+The engine doesn't depend on the window, so it can also be used from Python:
 
 ```python
-from organiser import scan, plan, duplicates, apply, rules
+from organiser import apply, plan, rules, scan
 
 result = scan.scan(r"C:\Users\Victor\Downloads",
                    ignore_folders=set(rules.known_destinations()))
-proposal = plan.build_plan(result)
+proposal = plan.build_plan(result, settle_seconds=120)
 for move in proposal.moves:
     print(move.info.name, "->", move.bucket)
-# apply.apply_moves(proposal.moves)   # only when you mean it
+# apply.apply_moves(proposal.moves)   # actually move the files
 ```
+
+## Building from source
+
+Requirements:
+
+- Python 3.10 or newer, with tkinter (included in the python.org installer).
+- For the tray icon: `pip install pystray pillow`. Without them the app works
+  but the tray option is hidden.
+- For the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+  (`winget install JRSoftware.InnoSetup`).
+
+Then run:
+
+```
+build.bat
+```
+
+This installs PyInstaller, pystray and Pillow if needed, draws the icon,
+builds `dist\FileOrganiser.exe`, and then, if Inno Setup is installed, builds
+`dist\FileOrganiserSetup.exe` from [`installer.iss`](installer.iss).
+
+Close the app before building, otherwise Windows won't let the old exe be
+replaced. The installer version number is set at the top of `installer.iss`.
 
 ## Tests
 
@@ -126,13 +303,60 @@ for move in proposal.moves:
 python -m unittest discover -s tests -v
 ```
 
-They run against temporary folders — no real file is touched.
+The tests use temporary folders and a temporary settings folder, so your real
+files, settings and undo history are never touched. One test briefly adds and
+removes a test entry in the Windows startup list.
 
-## Ideas not built yet
+## Project layout
 
-- A right-click rule editor in the GUI (the `overrides` setting is already read
-  from `settings.json`, extension → folder).
-- Dated archive folders for the long tail, e.g. `Archives/2024`.
-- Image-similarity duplicates (resized or re-encoded copies), which content
-  hashing cannot see.
-- Run on a schedule and notify, rather than organise silently.
+```
+app.py                       the window, and the --auto and --tray entry points
+organiser/
+  rules.py                   extension to folder rules, custom rule checks
+  scan.py                    reading a folder: names, sizes, dates
+  plan.py                    deciding where each file goes
+  apply.py                   moving files, undo records, undo
+  duplicates.py              finding duplicates and possible versions
+  cleanup.py                 Recycle Bin clear-outs, old installers
+  recycle.py                 the Windows Recycle Bin call
+  auto.py                    scan and plan in one step, the --auto run
+  startup.py                 the "When I sign in" startup entry
+  tray.py                    the tray icon
+  icon.py                    draws the app icon
+  config.py                  settings file and data folder
+scripts/make_demo_folder.py  creates a messy folder to try the app on
+tests/test_organiser.py      tests
+build.bat                    builds the exe and installer
+installer.iss                Inno Setup installer script
+run.bat                      opens the app from source without a console
+```
+
+## Troubleshooting
+
+**A file wasn't moved.** Check the Log tab. Common reasons: it was changed in
+the last 2 minutes, it's an unfinished download, it's open in another program,
+or it's already in the right folder.
+
+**Undo skipped some files.** Files that were moved, renamed or deleted after
+the run are left alone so nothing gets overwritten. The Log tab lists them.
+
+**The tray icon doesn't appear.** Windows sometimes hides new tray icons. Click
+the `^` arrow next to the clock, or turn the icon on in Settings >
+Personalisation > Taskbar > Other system tray icons.
+
+**Build fails with "Access is denied" on `FileOrganiser.exe`.** The app is still
+running. Close it, and quit the tray icon if it's running, then build again.
+
+**Windows warns before running the exe.** See the SmartScreen note under
+[Installing](#installing).
+
+## Uninstalling
+
+If you used the installer, uninstall from **Settings > Apps > Installed apps**.
+This also removes the sign-in entry and stops the tray icon if it's running.
+
+Your settings and undo records in `%LOCALAPPDATA%\FileOrganiser\` are kept in
+case you reinstall. Delete that folder to remove them too.
+
+If you used the standalone exe, set **When I sign in** to **Do nothing**, then
+delete the exe.

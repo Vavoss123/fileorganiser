@@ -6,7 +6,9 @@ and only then does :mod:`organiser.apply` act on it.
 
 from __future__ import annotations
 
+import datetime
 import os
+import time
 from dataclasses import dataclass
 
 from . import rules
@@ -25,6 +27,17 @@ LIBRARY_ROOTS = {
     "Documents/Presentations": "Documents",
     "Documents/Ebooks": "Documents",
 }
+
+
+#: Top-level buckets that ``date_folders`` splits by year or month.
+DATED_BUCKETS = ("Pictures", "Videos")
+
+
+def _date_parts(mtime: float, date_folders: str) -> list[str]:
+    if date_folders not in ("year", "month"):
+        return []
+    when = datetime.datetime.fromtimestamp(mtime)
+    return [f"{when:%Y}"] if date_folders == "year" else [f"{when:%Y}", f"{when:%m}"]
 
 
 @dataclass
@@ -76,19 +89,34 @@ def build_plan(
     home: str | None = None,
     overrides: dict[str, str] | None = None,
     include_other: bool = True,
+    settle_seconds: float = 0,
+    now: float | None = None,
+    date_folders: str = "off",
 ) -> Plan:
     """Decide where each scanned file should go.
 
     With ``route_to_libraries`` set, media and documents are sent to the real
     user folders (``~/Pictures`` etc.) and everything else stays in subfolders
     of the scanned root.
+
+    Files modified less than ``settle_seconds`` ago are left alone: some
+    browsers and download tools write straight to the final filename, so a
+    fresh file may still be arriving.
+
+    ``date_folders`` ("off", "year" or "month") files photos and videos under
+    the date they were last modified, e.g. ``Pictures/2026/10``.
     """
     home = home or os.path.expanduser("~")
     moves: list[Move] = []
     already_tidy: list[FileInfo] = []
     taken: set[str] = set()
+    skipped = list(result.skipped)
+    now = time.time() if now is None else now
 
     for info in result.files:
+        if settle_seconds and now - info.mtime < settle_seconds:
+            skipped.append((info.path, "changed in the last few minutes, may still be downloading"))
+            continue
         bucket = rules.destination_for(info.name, overrides)
         if bucket == rules.FALLBACK and not include_other:
             already_tidy.append(info)
@@ -100,6 +128,12 @@ def build_plan(
             base = os.path.join(home, library, tail) if tail else os.path.join(home, library)
         else:
             base = os.path.join(result.root, *bucket.split("/"))
+
+        if bucket.split("/")[0] in DATED_BUCKETS:
+            parts = _date_parts(info.mtime, date_folders)
+            if parts:
+                base = os.path.join(base, *parts)
+                bucket = "/".join([bucket, *parts])
 
         base = os.path.abspath(base)
         if os.path.abspath(os.path.dirname(info.path)) == base:
@@ -122,6 +156,6 @@ def build_plan(
         root=result.root,
         moves=moves,
         already_tidy=already_tidy,
-        skipped=result.skipped,
+        skipped=skipped,
         unreadable=result.unreadable,
     )

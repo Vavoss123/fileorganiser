@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -9,8 +10,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Settings and journals go to a throwaway folder, never the real undo history.
+_APPDATA = tempfile.TemporaryDirectory()
+os.environ["LOCALAPPDATA"] = _APPDATA.name
+
 from organiser import apply as apply_module
-from organiser import duplicates, plan as plan_module, rules, scan
+from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup
 
 
 def write(folder: str, name: str, content: bytes = b"x") -> str:
@@ -41,6 +46,23 @@ class RuleTests(unittest.TestCase):
     def test_unknown_goes_to_other(self):
         self.assertEqual(rules.destination_for("mystery.qzx"), "Other")
         self.assertEqual(rules.destination_for("no-extension"), "Other")
+
+    def test_custom_rules_win(self):
+        self.assertEqual(
+            rules.destination_for("receipt.pdf", {"pdf": "Documents/Receipts"}),
+            "Documents/Receipts",
+        )
+
+    def test_custom_rule_validation(self):
+        self.assertEqual(rules.clean_rule(" .PDF ", "\\Documents\\Receipts\\"),
+                         ("pdf", "Documents/Receipts"))
+        for ext, folder in [("", "Docs"), ("pdf", ""), ("pdf", "../Elsewhere"),
+                            ("pdf", "C:/Windows"), ("p df", "Docs"), ("pdf", "Do?cs")]:
+            with self.assertRaises(ValueError, msg=(ext, folder)):
+                rules.clean_rule(ext, folder)
+
+    def test_custom_rule_folders_are_skipped_on_rescan(self):
+        self.assertIn("Receipts", rules.known_destinations({"pdf": "Receipts"}))
 
     def test_in_progress_downloads_are_skipped(self):
         self.assertTrue(rules.should_skip("big.iso.crdownload"))
@@ -112,6 +134,27 @@ class PlanTests(unittest.TestCase):
         write(self.root, "mystery.qzx")
         self.assertEqual(len(self.plan_for().moves), 1)
         self.assertEqual(len(self.plan_for(include_other=False).moves), 0)
+
+    def test_freshly_changed_files_are_left_alone(self):
+        old = write(self.root, "old.png")
+        write(self.root, "arriving.mp4")
+        os.utime(old, (1_000_000, 1_000_000))
+        built = self.plan_for(settle_seconds=120)
+        self.assertEqual([m.info.name for m in built.moves], ["old.png"])
+        self.assertIn(os.path.join(self.root, "arriving.mp4"), [p for p, _ in built.skipped])
+
+    def test_date_folders_split_photos_and_videos_only(self):
+        import datetime
+        when = datetime.datetime(2025, 3, 14, 12).timestamp()
+        for name in ("cat.png", "clip.mp4", "notes.txt"):
+            os.utime(write(self.root, name), (when, when))
+        by_month = {m.info.name: m.bucket for m in self.plan_for(date_folders="month").moves}
+        self.assertEqual(by_month, {"cat.png": "Pictures/2025/03",
+                                    "clip.mp4": "Videos/2025/03",
+                                    "notes.txt": "Documents"})
+        by_year = {m.info.name: m.destination for m in self.plan_for(date_folders="year").moves}
+        self.assertEqual(by_year["cat.png"],
+                         os.path.join(self.root, "Pictures", "2025", "cat.png"))
 
     def test_library_routing_sends_media_home(self):
         write(self.root, "cat.png")
@@ -205,6 +248,58 @@ class DuplicateTests(unittest.TestCase):
         self.assertNotIn("photo", [g.stem for g in versions])
 
 
+class RecycleTests(unittest.TestCase):
+    """The Recycle Bin itself is stubbed out; these test the safety checks."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+        self.binned: list[str] = []
+
+    def recycler(self, path):
+        self.binned.append(os.path.basename(path))
+        os.remove(path)
+
+    def groups(self):
+        return duplicates.find_duplicates(scan.scan(self.root).files)
+
+    def test_redundant_copies_are_recycled_and_the_keeper_stays(self):
+        write(self.root, "report.docx", b"same")
+        write(self.root, "report - Copy.docx", b"same")
+        report = cleanup.recycle_duplicates(self.groups(), recycler=self.recycler)
+        self.assertEqual(self.binned, ["report - Copy.docx"])
+        self.assertEqual(report.freed, 4)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "report.docx")))
+
+    def test_nothing_is_recycled_if_the_keeper_changed(self):
+        write(self.root, "report.docx", b"same")
+        write(self.root, "report - Copy.docx", b"same")
+        groups = self.groups()
+        write(self.root, "report.docx", b"edited since the scan")
+        report = cleanup.recycle_duplicates(groups, recycler=self.recycler)
+        self.assertEqual(self.binned, [])
+        self.assertEqual(len(report.failed), 1)
+
+    def test_a_copy_edited_since_the_scan_is_spared(self):
+        write(self.root, "report.docx", b"same")
+        write(self.root, "report - Copy.docx", b"same")
+        groups = self.groups()
+        write(self.root, "report - Copy.docx", b"now different")
+        cleanup.recycle_duplicates(groups, recycler=self.recycler)
+        self.assertEqual(self.binned, [])
+
+
+    def test_old_installers_are_found_by_age_and_extension(self):
+        day = 86400
+        now = 100 * day
+        for name, age in [("old.exe", 45), ("new.msi", 3), ("old-photo.png", 90)]:
+            when = now - age * day
+            os.utime(write(self.root, name), (when, when))
+        found = cleanup.old_installers(scan.scan(self.root).files, days=30, now=now)
+        self.assertEqual([f.name for f in found], ["old.exe"])
+
+
 class ApplyTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -268,6 +363,71 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(len(undone.failed), 1)
         self.assertEqual(undone.moved, [])
 
+    def test_journal_is_on_disk_before_the_run_finishes(self):
+        write(self.root, "cat.png", b"image")
+        write(self.root, "clip.mp4", b"video")
+        seen: list[int] = []
+
+        def progress(done, _total):
+            journals = apply_module.list_journals()
+            moves = apply_module.read_journal(journals[0])["moves"] if journals else []
+            seen.append(len(moves))
+
+        apply_module.apply_moves(self.build().moves, progress=progress)
+        self.assertEqual(seen, [1, 2])
+
+    def test_interrupted_run_can_still_be_undone(self):
+        write(self.root, "cat.png", b"image")
+        write(self.root, "clip.mp4", b"video")
+
+        def crash(done, _total):
+            if done == 1:
+                raise KeyboardInterrupt  # stands in for a crash or power cut
+
+        with self.assertRaises(KeyboardInterrupt):
+            apply_module.apply_moves(self.build().moves, progress=crash)
+        journal = apply_module.list_journals()[0]
+        undone = apply_module.undo(journal)
+        self.assertFalse(undone.failed)
+        self.assertEqual(sorted(os.listdir(self.root)), ["cat.png", "clip.mp4"])
+
+    def test_torn_last_line_is_ignored(self):
+        write(self.root, "cat.png", b"image")
+        report = apply_module.apply_moves(self.build().moves)
+        with open(report.journal_path, "a", encoding="utf-8") as handle:
+            handle.write('{"from": "half')
+        self.assertFalse(apply_module.undo(report.journal_path).failed)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "cat.png")))
+
+    def test_old_json_journals_still_undo(self):
+        write(self.root, os.path.join("Pictures", "cat.png"), b"image")
+        legacy = os.path.join(self.journals.name, "20250101-120000.json")
+        with open(legacy, "w", encoding="utf-8") as handle:
+            json.dump({
+                "created": 0,
+                "created_folders": [os.path.join(self.root, "Pictures")],
+                "moves": [{"from": os.path.join(self.root, "cat.png"),
+                           "to": os.path.join(self.root, "Pictures", "cat.png")}],
+            }, handle)
+        self.assertFalse(apply_module.undo(legacy).failed)
+        self.assertEqual(os.listdir(self.root), ["cat.png"])
+
+    def test_history_lists_undoable_runs_newest_first(self):
+        write(self.root, "cat.png")
+        first = apply_module.apply_moves(self.build().moves)
+        os.utime(first.journal_path, (1_000_000, 1_000_000))
+        write(self.root, "clip.mp4")
+        write(self.root, "song.mp3")
+        second = apply_module.apply_moves(self.build().moves)
+        history = apply_module.run_history()
+        self.assertEqual([run.path for run in history], [second.journal_path, first.journal_path])
+        self.assertEqual(history[0].moves, 2)
+        self.assertEqual(os.path.normcase(history[0].source_folder), os.path.normcase(self.root))
+
+        apply_module.undo(first.journal_path)  # an older run, not the latest
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "cat.png")))
+        self.assertEqual([run.path for run in apply_module.run_history()], [second.journal_path])
+
     def test_missing_source_is_reported_not_raised(self):
         write(self.root, "cat.png")
         built = self.build()
@@ -276,6 +436,49 @@ class ApplyTests(unittest.TestCase):
         self.assertEqual(report.moved, [])
         self.assertEqual(len(report.failed), 1)
 
+
+class AutoTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = self.tmp.name
+        self.addCleanup(self.tmp.cleanup)
+        self.settings = dict(config.DEFAULTS, folder=self.root)
+
+    def test_auto_run_tidies_and_logs(self):
+        os.utime(write(self.root, "cat.png"), (1_000_000, 1_000_000))
+        write(self.root, "arriving.mp4")  # too fresh to touch
+        report = auto.run(self.settings)
+        self.assertEqual(len(report.moved), 1)
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "Pictures", "cat.png")))
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "arriving.mp4")))
+        with open(auto.log_path(), encoding="utf-8") as handle:
+            self.assertIn("1 file(s) moved", handle.read())
+        self.assertFalse(apply_module.undo(report.journal_path).failed)
+
+    def test_auto_run_with_a_missing_folder_does_nothing(self):
+        self.settings["folder"] = os.path.join(self.root, "gone")
+        self.assertIsNone(auto.run(self.settings))
+
+    def test_startup_commands_run_windowless(self):
+        self.assertTrue(startup.command_for("auto").endswith("--auto"))
+        self.assertTrue(startup.command_for("tray").endswith("--tray"))
+        self.assertNotIn('python.exe"', startup.command_for("auto").lower())
+
+    def test_quiet_run_logs_nothing_when_there_is_nothing_to_do(self):
+        def log_size():
+            return os.path.getsize(auto.log_path()) if os.path.exists(auto.log_path()) else 0
+
+        before = log_size()
+        auto.run(self.settings, quiet=True)
+        self.assertEqual(log_size(), before)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows registry")
+    def test_startup_entry_round_trip(self):
+        name = "FileOrganiserTest-{}".format(os.getpid())
+        self.addCleanup(startup.set_mode, "off", name)
+        for mode in ("auto", "tray", "off"):
+            startup.set_mode(mode, name)
+            self.assertEqual(startup.current_mode(name), mode)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

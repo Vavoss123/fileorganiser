@@ -2,7 +2,8 @@
 
 The app always shows you a plan first. Scanning and hashing never change
 anything on disk; files move only when you press "Apply selected moves", and
-that run can be undone. Duplicates are reported, never deleted.
+that run can be undone. Nothing is ever permanently deleted: duplicates go to
+the Recycle Bin, and only when you ask.
 """
 
 from __future__ import annotations
@@ -19,9 +20,15 @@ from tkinter import filedialog, messagebox, ttk
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
-from organiser import config, duplicates, plan as plan_module, rules, scan  # noqa: E402
+from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
 
 CHECK = "✓"
+DATE_CHOICES = {"off": "Off", "year": "By year", "month": "By year and month"}
+STARTUP_CHOICES = {
+    "off": "Do nothing",
+    "auto": "Tidy once",
+    "tray": "Keep tidying from the tray",
+}
 PAD = 10
 
 
@@ -74,6 +81,7 @@ class OrganiserApp(ttk.Frame):
         self.plan: plan_module.Plan | None = None
         self.duplicate_groups: list[duplicates.DuplicateGroup] = []
         self.version_groups: list[duplicates.VersionGroup] = []
+        self.old_installers: list[scan.FileInfo] = []
         self.move_for_item: dict[str, plan_module.Move] = {}
         self.children_of: dict[str, list[str]] = {}
         self.path_for_item: dict[str, str] = {}
@@ -83,6 +91,10 @@ class OrganiserApp(ttk.Frame):
         self.libraries_var = tk.BooleanVar(value=self.settings["route_to_libraries"])
         self.other_var = tk.BooleanVar(value=self.settings["include_other"])
         self.duplicates_var = tk.BooleanVar(value=self.settings["find_duplicates"])
+        self.date_var = tk.StringVar(
+            value=DATE_CHOICES.get(self.settings.get("date_folders"), DATE_CHOICES["off"])
+        )
+        self.startup_var = tk.StringVar(value=STARTUP_CHOICES[startup.current_mode()])
         self.status_var = tk.StringVar(value="Pick a folder and press Scan.")
 
         self.pack(fill="both", expand=True)
@@ -119,18 +131,46 @@ class OrganiserApp(ttk.Frame):
         ).grid(row=0, column=2, sticky="w", padx=(0, 18))
         ttk.Checkbutton(
             options,
-            text="Collect unrecognised files in “Other”",
+            text="Put unrecognised files in 'Other'",
             variable=self.other_var,
         ).grid(row=1, column=2, sticky="w", pady=(4, 0))
         ttk.Checkbutton(
             options, text="Look for duplicates", variable=self.duplicates_var
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        ttk.Label(options, text="Date folders for photos and videos:").grid(
+            row=2, column=0, columnspan=2, sticky="w", pady=(4, 0)
+        )
+        ttk.Combobox(
+            options,
+            textvariable=self.date_var,
+            values=list(DATE_CHOICES.values()),
+            state="readonly",
+            width=18,
+        ).grid(row=2, column=2, sticky="w", pady=(4, 0))
+        if sys.platform == "win32":
+            ttk.Label(options, text="When I sign in:").grid(
+                row=3, column=0, columnspan=2, sticky="w", pady=(4, 0)
+            )
+            choices = [STARTUP_CHOICES["off"], STARTUP_CHOICES["auto"]]
+            if tray.available():
+                choices.append(STARTUP_CHOICES["tray"])
+            startup_box = ttk.Combobox(
+                options, textvariable=self.startup_var, values=choices, state="readonly",
+                width=34,
+            )
+            startup_box.grid(row=3, column=2, sticky="w", pady=(4, 0))
+            startup_box.bind("<<ComboboxSelected>>", lambda _e: self._change_startup())
+        options.columnconfigure(3, weight=1)
+        ttk.Button(options, text="Custom rules…", command=self.edit_rules).grid(
+            row=0, column=3, sticky="e"
+        )
 
         self.tabs = ttk.Notebook(self)
         self.tabs.grid(row=2, column=0, sticky="nsew")
         self.tabs.add(self._build_plan_tab(), text="Plan")
         self.tabs.add(self._build_duplicates_tab(), text="Duplicates")
         self.tabs.add(self._build_versions_tab(), text="Possible versions")
+        self.tabs.add(self._build_installers_tab(), text="Old installers")
         self.tabs.add(self._build_log_tab(), text="Log")
 
         footer = ttk.Frame(self)
@@ -140,7 +180,7 @@ class OrganiserApp(ttk.Frame):
         self.progress.grid(row=0, column=0, padx=(0, 10))
         ttk.Label(footer, textvariable=self.status_var).grid(row=0, column=1, sticky="w")
         self.undo_button = ttk.Button(
-            footer, text="Undo last run", command=self.undo_last, state="disabled"
+            footer, text="Undo…", command=self.undo_last, state="disabled"
         )
         self.undo_button.grid(row=0, column=2, padx=6)
         self.apply_button = ttk.Button(
@@ -204,8 +244,8 @@ class OrganiserApp(ttk.Frame):
         ttk.Label(
             page,
             text=(
-                "Identical content, proven byte for byte. This app never deletes anything "
-                "— the suggestion below is for you to act on."
+                "Identical content, proven byte for byte. Copies marked 'safe to delete' "
+                "can be sent to the Recycle Bin, so you can still restore them."
             ),
             wraplength=900,
         ).grid(row=0, column=0, sticky="w")
@@ -214,9 +254,16 @@ class OrganiserApp(ttk.Frame):
         ttk.Button(bar, text="Show in Explorer", command=self._reveal_duplicate_selection).pack(
             side="left"
         )
+        self.recycle_duplicates_button = ttk.Button(
+            bar,
+            text="Send duplicates to Recycle Bin",
+            command=self._recycle_duplicates,
+            state="disabled",
+        )
+        self.recycle_duplicates_button.pack(side="left", padx=6)
         ttk.Button(
             bar, text="Copy suggested deletions", command=self._copy_suggested_deletions
-        ).pack(side="left", padx=6)
+        ).pack(side="left")
         self.duplicate_summary = ttk.Label(bar, text="")
         self.duplicate_summary.pack(side="right")
 
@@ -240,7 +287,7 @@ class OrganiserApp(ttk.Frame):
         ttk.Label(
             page,
             text=(
-                "Names that look like the same thing but hold different content — likely "
+                "Names that look like the same thing but hold different content, likely "
                 "successive versions. A hint only: check before you throw anything away."
             ),
             wraplength=900,
@@ -261,6 +308,42 @@ class OrganiserApp(ttk.Frame):
         frame.grid(row=2, column=0, sticky="nsew")
         self.version_tree.bind("<Double-1>", lambda _e: self._reveal_version_selection())
         self.version_tree.tag_configure("group", font=("Segoe UI", 9, "bold"))
+        return page
+
+    def _build_installers_tab(self) -> ttk.Frame:
+        page = ttk.Frame(self, padding=8)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(2, weight=1)
+        ttk.Label(
+            page,
+            text=(
+                "Setup files untouched for {} days or more. Most have done their job, "
+                "and can be downloaded again if you need them."
+            ).format(self.settings.get("installer_age_days", 30)),
+            wraplength=900,
+        ).grid(row=0, column=0, sticky="w")
+        bar = ttk.Frame(page)
+        bar.grid(row=1, column=0, sticky="ew", pady=6)
+        ttk.Button(bar, text="Show in Explorer", command=self._reveal_installer_selection).pack(
+            side="left"
+        )
+        self.recycle_installers_button = ttk.Button(
+            bar,
+            text="Send all to Recycle Bin",
+            command=self._recycle_installers,
+            state="disabled",
+        )
+        self.recycle_installers_button.pack(side="left", padx=6)
+        self.installer_summary = ttk.Label(bar, text="")
+        self.installer_summary.pack(side="right")
+        frame, self.installer_tree = self._tree(
+            page,
+            ("size", "modified", "folder"),
+            ("Size", "Modified", "Folder"),
+            (80, 145, 260),
+        )
+        frame.grid(row=2, column=0, sticky="nsew")
+        self.installer_tree.bind("<Double-1>", lambda _e: self._reveal_installer_selection())
         return page
 
     def _build_log_tab(self) -> ttk.Frame:
@@ -290,15 +373,62 @@ class OrganiserApp(ttk.Frame):
         if chosen:
             self.folder_var.set(os.path.normpath(chosen))
 
+    def edit_rules(self) -> None:
+        dialog = RulesDialog(self.master, self.settings.get("overrides", {}))
+        self.master.wait_window(dialog)
+        if dialog.result is not None:
+            self.settings["overrides"] = dialog.result
+            config.save(self.current_settings())
+            self.log("Custom rules: {}".format(
+                ", ".join(".{} → {}".format(e, f) for e, f in sorted(dialog.result.items()))
+                or "none"
+            ))
+
+    def _change_startup(self) -> None:
+        current = startup.current_mode()
+        wanted = next(k for k, v in STARTUP_CHOICES.items() if v == self.startup_var.get())
+        if wanted == current:
+            return
+        how = {
+            "auto": "Each time you sign in, File Organiser will tidy",
+            "tray": "File Organiser will sit in the tray and, every minute, tidy",
+        }
+        if wanted != "off" and not messagebox.askokcancel(
+            "When I sign in",
+            "{}\n{}\nwith the options shown here, without asking first.\n\n"
+            "It only moves files, never deletes them, and each run can be undone from "
+            "Undo… A log is kept at\n{}".format(how[wanted], self.folder_var.get(), auto.log_path()),
+        ):
+            self.startup_var.set(STARTUP_CHOICES[current])
+            return
+        try:
+            if wanted != "off":
+                self.settings = self.current_settings()
+                config.save(self.settings)  # the sign-in run uses what is saved
+            startup.set_mode(wanted)
+        except OSError as exc:
+            self.startup_var.set(STARTUP_CHOICES[startup.current_mode()])
+            messagebox.showerror("File Organiser", str(exc))
+            return
+        self.log("When I sign in: {}".format(STARTUP_CHOICES[wanted]))
+        if wanted == "tray":
+            subprocess.Popen(startup.command_for("tray"))  # start it now, not just next time
+
     def current_settings(self) -> dict:
-        return {
+        # Start from the stored settings so ones with no control on screen
+        # (custom rules, settle time, installer age) survive a save.
+        settings = dict(self.settings)
+        settings.update({
             "folder": self.folder_var.get(),
             "max_depth": int(self.depth_var.get()),
             "route_to_libraries": bool(self.libraries_var.get()),
             "include_other": bool(self.other_var.get()),
             "find_duplicates": bool(self.duplicates_var.get()),
-            "overrides": self.settings.get("overrides", {}),
-        }
+            "date_folders": next(
+                (k for k, v in DATE_CHOICES.items() if v == self.date_var.get()), "off"
+            ),
+        })
+        return settings
 
     def _busy(self, busy: bool) -> None:
         self.scan_button.configure(state="disabled" if busy else "normal")
@@ -333,17 +463,9 @@ class OrganiserApp(ttk.Frame):
 
     def _scan_worker(self, settings: dict) -> None:
         try:
-            result = scan.scan(
-                settings["folder"],
-                max_depth=settings["max_depth"],
-                ignore_folders=set(rules.known_destinations()),
+            result, built = auto.scan_and_plan(
+                settings,
                 progress=lambda n: self.events.put(("status", "Found {} files…".format(n))),
-            )
-            built = plan_module.build_plan(
-                result,
-                route_to_libraries=settings["route_to_libraries"],
-                overrides=settings.get("overrides"),
-                include_other=settings["include_other"],
             )
             groups: list[duplicates.DuplicateGroup] = []
             if settings["find_duplicates"]:
@@ -354,9 +476,21 @@ class OrganiserApp(ttk.Frame):
                     unreadable=built.unreadable,
                 )
             versions = duplicates.find_possible_versions(result.files, groups)
-            self.events.put(("scanned", (built, groups, versions)))
+            installers = cleanup.old_installers(
+                result.files + self._already_filed_installers(settings),
+                days=settings.get("installer_age_days", 30),
+            )
+            self.events.put(("scanned", (built, groups, versions, installers)))
         except Exception as exc:  # a GUI should never die on an awkward folder
             self.events.put(("error", str(exc)))
+
+    @staticmethod
+    def _already_filed_installers(settings: dict) -> list[scan.FileInfo]:
+        """Installers a previous run filed away, which the main scan skips."""
+        folder = os.path.join(settings["folder"], cleanup.INSTALLERS)
+        if not os.path.isdir(folder):
+            return []
+        return scan.scan(folder, max_depth=1).files
 
     def _drain_events(self) -> None:
         try:
@@ -387,16 +521,18 @@ class OrganiserApp(ttk.Frame):
 
     # ----------------------------------------------------------------- results
 
-    def _show_results(self, built, groups, versions) -> None:
+    def _show_results(self, built, groups, versions, installers) -> None:
         self.progress.stop()
         self.progress.configure(mode="determinate", maximum=100, value=0)
         self.plan = built
         self.duplicate_groups = groups
         self.version_groups = versions
+        self.old_installers = installers
         self.path_for_item = {}
         self._fill_plan_tree()
         self._fill_duplicate_tree()
         self._fill_version_tree()
+        self._fill_installer_tree()
         self._busy(False)
 
         wasted = sum(group.wasted for group in groups)
@@ -497,6 +633,9 @@ class OrganiserApp(ttk.Frame):
                 )
                 self.path_for_item[item] = info.path
         wasted = sum(group.wasted for group in self.duplicate_groups)
+        self.recycle_duplicates_button.configure(
+            state="normal" if self.duplicate_groups else "disabled"
+        )
         self.duplicate_summary.configure(
             text="{} set(s) · {} recoverable".format(
                 len(self.duplicate_groups), human_size(wasted)
@@ -513,7 +652,7 @@ class OrganiserApp(ttk.Frame):
             node = tree.insert(
                 "",
                 "end",
-                text="“{}” · {} files".format(group.stem, len(group.files)),
+                text="'{}' · {} files".format(group.stem, len(group.files)),
                 values=("different content", "", "", ""),
                 open=True,
                 tags=("group",),
@@ -535,6 +674,28 @@ class OrganiserApp(ttk.Frame):
             text="{} group(s)".format(len(self.version_groups))
             if self.version_groups
             else "Nothing similar."
+        )
+
+    def _fill_installer_tree(self) -> None:
+        tree = self.installer_tree
+        tree.delete(*tree.get_children())
+        root = self.plan.root if self.plan else None
+        for info in self.old_installers:
+            item = tree.insert(
+                "",
+                "end",
+                text=info.name,
+                values=(human_size(info.size), timestamp(info.mtime), display_folder(info.path, root)),
+            )
+            self.path_for_item[item] = info.path
+        total = sum(info.size for info in self.old_installers)
+        self.recycle_installers_button.configure(
+            state="normal" if self.old_installers else "disabled"
+        )
+        self.installer_summary.configure(
+            text="{} installer(s) · {}".format(len(self.old_installers), human_size(total))
+            if self.old_installers
+            else "No old installers."
         )
 
     # --------------------------------------------------------------- selection
@@ -602,6 +763,25 @@ class OrganiserApp(ttk.Frame):
         if path:
             reveal(path)
 
+    def _reveal_installer_selection(self) -> None:
+        path = self._selected_path(self.installer_tree)
+        if path:
+            reveal(path)
+
+    def _recycle_installers(self) -> None:
+        files = self.old_installers
+        if not files or (self.worker and self.worker.is_alive()):
+            return
+        if not messagebox.askokcancel(
+            "Send old installers to Recycle Bin",
+            "Send {} installer(s) ({}) to the Recycle Bin?\n\n"
+            "You can restore them from the Recycle Bin.".format(
+                len(files), human_size(sum(f.size for f in files))
+            ),
+        ):
+            return
+        self._after_recycle(cleanup.recycle_files([(f.path, f.size) for f in files]))
+
     def _copy_suggested_deletions(self) -> None:
         lines = [info.path for group in self.duplicate_groups for info in group.redundant]
         if not lines:
@@ -610,6 +790,34 @@ class OrganiserApp(ttk.Frame):
         self.clipboard_clear()
         self.clipboard_append("\n".join(lines))
         self.status_var.set("Copied {} path(s) to the clipboard.".format(len(lines)))
+
+    def _recycle_duplicates(self) -> None:
+        groups = self.duplicate_groups
+        count = sum(len(group.redundant) for group in groups)
+        if not count or (self.worker and self.worker.is_alive()):
+            return
+        wasted = sum(group.wasted for group in groups)
+        if not messagebox.askokcancel(
+            "Send duplicates to Recycle Bin",
+            "Send {} duplicate file(s) ({}) to the Recycle Bin?\n\n"
+            "One copy of each is kept. Each file is checked again first, and "
+            "you can restore them from the Recycle Bin.".format(count, human_size(wasted)),
+        ):
+            return
+        self._after_recycle(cleanup.recycle_duplicates(groups))
+
+    def _after_recycle(self, report: cleanup.RecycleReport) -> None:
+        self.log("{} ({} freed)".format(report.summary, human_size(report.freed)))
+        for path in report.recycled:
+            self.log("  recycled {}".format(path))
+        for path, why in report.failed:
+            self.log("  kept {}: {}".format(path, why))
+        if report.failed:
+            messagebox.showwarning(
+                "File Organiser",
+                "{} file(s) were left alone. See the Log tab.".format(len(report.failed)),
+            )
+        self.start_scan()
 
     # ------------------------------------------------------------------- apply
 
@@ -651,7 +859,7 @@ class OrganiserApp(ttk.Frame):
             self.log("  FAILED {}: {}".format(source, why))
         if report.journal_path:
             self.log("  undo journal: {}".format(report.journal_path))
-        self.status_var.set(report.summary + " — rescanning…")
+        self.status_var.set(report.summary + ". Rescanning…")
         self._busy(False)
         if report.failed:
             messagebox.showwarning(
@@ -661,26 +869,173 @@ class OrganiserApp(ttk.Frame):
         self.start_scan()
 
     def undo_last(self) -> None:
-        journals = apply_module.list_journals()
-        if not journals:
+        history = apply_module.run_history()
+        if not history:
             messagebox.showinfo("File Organiser", "There is nothing to undo.")
             return
-        latest = journals[0]
-        if not messagebox.askokcancel(
-            "Undo last run",
-            "Put the files from the last run back where they were?\n\n{}".format(
-                os.path.basename(latest)
-            ),
-        ):
+        dialog = HistoryDialog(self.master, history)
+        self.master.wait_window(dialog)
+        if not dialog.result:
             return
-        report = apply_module.undo(latest)
-        self.log("Undo: {}".format(report.summary))
+        report = apply_module.undo(dialog.result.path)
+        self.log("Undo of run from {}: {}".format(
+            timestamp(dialog.result.created), report.summary
+        ))
         for source, why in report.failed:
             self.log("  skipped {}: {}".format(source, why))
-        self.status_var.set("Undo complete — {}".format(report.summary))
+        self.status_var.set("Undo complete: {}".format(report.summary))
         if not apply_module.list_journals():
             self.undo_button.configure(state="disabled")
         self.start_scan()
+
+
+class HistoryDialog(tk.Toplevel):
+    """Pick a past run to undo. The newest is selected, so Enter undoes it."""
+
+    def __init__(self, master: tk.Misc, history: list[apply_module.RunSummary]) -> None:
+        super().__init__(master)
+        self.title("Undo a run")
+        self.transient(master)
+        self.minsize(560, 300)
+        self.result: apply_module.RunSummary | None = None
+        self.by_item: dict[str, apply_module.RunSummary] = {}
+
+        page = ttk.Frame(self, padding=PAD)
+        page.pack(fill="both", expand=True)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+        ttk.Label(
+            page,
+            text="Files go back where they came from. Files you have moved or "
+            "renamed since are left where they are.",
+            wraplength=540,
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+
+        tree = ttk.Treeview(page, columns=("when", "files", "from"), show="headings",
+                            height=10, selectmode="browse")
+        tree.heading("when", text="When")
+        tree.heading("files", text="Files")
+        tree.heading("from", text="Moved from")
+        tree.column("when", width=140, stretch=False)
+        tree.column("files", width=60, stretch=False, anchor="e")
+        tree.grid(row=1, column=0, sticky="nsew")
+        for run in history:
+            item = tree.insert("", "end", values=(timestamp(run.created), run.moves,
+                                                  run.source_folder))
+            self.by_item[item] = run
+        first = tree.get_children()[0]
+        tree.selection_set(first)
+        tree.focus(first)
+        self.tree = tree
+
+        buttons = ttk.Frame(page)
+        buttons.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Undo selected run", command=self._choose).pack(
+            side="right", padx=6
+        )
+        tree.bind("<Double-1>", lambda _e: self._choose())
+        self.bind("<Return>", lambda _e: self._choose())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        tree.focus_set()
+        self.grab_set()
+
+    def _choose(self) -> None:
+        selected = self.tree.selection()
+        if selected:
+            self.result = self.by_item[selected[0]]
+            self.destroy()
+
+
+class RulesDialog(tk.Toplevel):
+    """Edit the user's own extension → folder rules, which beat the built-ins."""
+
+    def __init__(self, master: tk.Misc, overrides: dict[str, str]) -> None:
+        super().__init__(master)
+        self.title("Custom rules")
+        self.transient(master)
+        self.resizable(True, True)
+        self.minsize(460, 360)
+        self.rules = dict(overrides)
+        self.result: dict[str, str] | None = None
+
+        page = ttk.Frame(self, padding=PAD)
+        page.pack(fill="both", expand=True)
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
+        ttk.Label(
+            page,
+            text="Send a file type somewhere of your choosing. These win over the "
+            "built-in rules. Folders are inside the folder being tidied.",
+            wraplength=430,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        self.tree = ttk.Treeview(
+            page, columns=("folder",), show="tree headings", height=8, selectmode="browse"
+        )
+        self.tree.heading("#0", text="Extension")
+        self.tree.heading("folder", text="Goes to")
+        self.tree.column("#0", width=110, stretch=False)
+        self.tree.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.tree.bind("<<TreeviewSelect>>", self._on_select)
+
+        form = ttk.Frame(page)
+        form.grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
+        form.columnconfigure(3, weight=1)
+        ttk.Label(form, text="Extension").grid(row=0, column=0)
+        self.ext_var = tk.StringVar()
+        ext_entry = ttk.Entry(form, textvariable=self.ext_var, width=10)
+        ext_entry.grid(row=0, column=1, padx=(6, 12))
+        ttk.Label(form, text="Goes to").grid(row=0, column=2)
+        self.folder_var = tk.StringVar()
+        ttk.Combobox(
+            form, textvariable=self.folder_var, values=rules.known_destinations()
+        ).grid(row=0, column=3, sticky="ew", padx=(6, 0))
+
+        buttons = ttk.Frame(page)
+        buttons.grid(row=3, column=0, columnspan=2, sticky="ew")
+        ttk.Button(buttons, text="Add / update", command=self._add).pack(side="left")
+        ttk.Button(buttons, text="Remove", command=self._remove).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Save", command=self._save).pack(side="right", padx=6)
+
+        self._refresh()
+        ext_entry.focus_set()
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.grab_set()
+
+    def _refresh(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        for ext, folder in sorted(self.rules.items()):
+            self.tree.insert("", "end", iid=ext, text="." + ext, values=(folder,))
+
+    def _on_select(self, _event=None) -> None:
+        selected = self.tree.selection()
+        if selected:
+            self.ext_var.set(selected[0])
+            self.folder_var.set(self.rules[selected[0]])
+
+    def _add(self) -> None:
+        try:
+            ext, folder = rules.clean_rule(self.ext_var.get(), self.folder_var.get())
+        except ValueError as exc:
+            messagebox.showerror("Custom rules", str(exc), parent=self)
+            return
+        self.rules[ext] = folder
+        self._refresh()
+        self.tree.selection_set(ext)
+        self.tree.see(ext)
+
+    def _remove(self) -> None:
+        for ext in self.tree.selection():
+            self.rules.pop(ext, None)
+        self.ext_var.set("")
+        self.folder_var.set("")
+        self._refresh()
+
+    def _save(self) -> None:
+        self.result = self.rules
+        self.destroy()
 
 
 def _sharpen_on_high_dpi() -> None:
@@ -696,6 +1051,12 @@ def _sharpen_on_high_dpi() -> None:
 
 
 def main() -> None:
+    if "--auto" in sys.argv[1:]:
+        auto.run()
+        return
+    if "--tray" in sys.argv[1:]:
+        tray.run()
+        return
     _sharpen_on_high_dpi()
     root = tk.Tk()
     root.title("File Organiser")
@@ -707,6 +1068,15 @@ def main() -> None:
     except tk.TclError:
         pass
     style.configure("Treeview", rowheight=24)
+    try:  # the app's own icon instead of Tk's feather, when Pillow is there
+        from PIL import ImageTk
+
+        from organiser.icon import make_image
+
+        root._icon = ImageTk.PhotoImage(make_image(64))
+        root.iconphoto(True, root._icon)
+    except Exception:
+        pass
     app = OrganiserApp(root)
     root.protocol(
         "WM_DELETE_WINDOW", lambda: (config.save(app.current_settings()), root.destroy())

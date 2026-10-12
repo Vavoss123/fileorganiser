@@ -1,4 +1,4 @@
-"""Build a believably messy folder so the app can be tried without risk.
+"""Create a messy demo folder so the app can be tried without touching real files.
 
     python scripts/make_demo_folder.py [target]
 
@@ -11,6 +11,7 @@ import os
 import random
 import sys
 import tempfile
+import time
 
 CV = b"VICTOR STOKOE\nCurriculum Vitae\n" + b"experience " * 400
 INVOICE = b"%PDF-1.4 invoice " + b"0" * 2000
@@ -68,6 +69,10 @@ def main() -> None:
         path = os.path.join(target, name)
         with open(path, "wb") as handle:
             handle.write(content)
+        # Spread files over the last year or so, as a real Downloads would be.
+        # (The app leaves just-modified files alone, so fresh ones would hide.)
+        when = time.time() - random.uniform(1, 400) * 86400
+        os.utime(path, (when, when))
     print("Demo folder ready:", target)
     print(len(FILES), "files written.")
 

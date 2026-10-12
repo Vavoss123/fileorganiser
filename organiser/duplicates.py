@@ -52,6 +52,11 @@ def _hash(path: str, limit: int | None = None) -> str:
     return digest.hexdigest()
 
 
+def file_hash(path: str) -> str:
+    """SHA-256 of the whole file, read fresh from disk."""
+    return _hash(path)
+
+
 def content_hash(info: FileInfo) -> str:
     if info._sha256 is None:
         info._sha256 = _hash(info.path)

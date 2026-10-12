@@ -141,9 +141,32 @@ def destination_for(filename: str, overrides: dict[str, str] | None = None) -> s
     return FALLBACK
 
 
-def known_destinations() -> list[str]:
+def known_destinations(overrides: dict[str, str] | None = None) -> list[str]:
     """Every folder the rules can produce, for ignoring on a re-scan."""
     seen = {d for d in list(TYPE_RULES.values()) + list(APP_RULES.values()) if d}
+    seen.update((overrides or {}).values())
     seen.add(FALLBACK)
     tops = {d.split("/")[0] for d in seen}
     return sorted(seen | tops)
+
+
+_BAD_FOLDER_CHARS = set('<>:"|?*')
+
+
+def clean_rule(extension: str, folder: str) -> tuple[str, str]:
+    """Validate a user rule, returning ``("pdf", "Documents/Receipts")``.
+
+    Raises ``ValueError`` with a message fit to show the user. Destinations
+    must stay inside the scanned folder: no drive letters, no ``..``.
+    """
+    ext = extension.strip().lstrip(".").lower()
+    if not ext or any(c in ext for c in ' /\.' ) or any(c in _BAD_FOLDER_CHARS for c in ext):
+        raise ValueError("Type an extension such as pdf or .blend")
+    parts = [part.strip() for part in folder.replace("\\", "/").split("/")]
+    parts = [part for part in parts if part]
+    if not parts:
+        raise ValueError("Type a folder such as Documents/Receipts")
+    for part in parts:
+        if part in (".", "..") or any(c in _BAD_FOLDER_CHARS for c in part) or part.endswith("."):
+            raise ValueError("'{}' can't be used in a folder name".format(part))
+    return ext, "/".join(parts)
