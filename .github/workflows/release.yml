@@ -5,7 +5,8 @@
 # Push a tag like v1.4 to also publish them as a GitHub Release:
 #     git tag v1.4
 #     git push origin v1.4
-# The tag must match __version__ in organiser/__init__.py.
+# The tag must match __version__ in organiser/__init__.py, and the release
+# notes come from the "## v1.4" section of CHANGELOG.md.
 
 name: Build and release
 
@@ -22,9 +23,9 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -68,9 +69,9 @@ jobs:
   mac:
     runs-on: macos-latest  # Apple silicon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -126,10 +127,23 @@ jobs:
     needs: [windows, mac]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        run: |
+          python3 scripts/release_notes.py "${{ github.ref_name }}" > notes.md
+          if [ -s notes.md ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::CHANGELOG.md has no '## ${{ github.ref_name }}' section; using commit titles."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -138,4 +152,5 @@ jobs:
             dist/FileOrganiser.exe
             dist/FileOrganiserSetup.exe
             dist/FileOrganiser-mac.dmg
-          generate_release_notes: true
+          body_path: ${{ steps.notes.outputs.found == 'true' && 'notes.md' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.found != 'true' }}

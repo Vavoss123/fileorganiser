@@ -423,10 +423,14 @@ app once to check it works (`--smoke-test`), and attaches them to a release.
 Every push runs these builds and checks; only a version tag publishes. To
 publish version 1.4:
 
-1. Set `__version__ = "1.4"` in [`organiser/__init__.py`](organiser/__init__.py)
-   and commit it. The app compares this with the newest release to decide
-   whether to show the update notice.
-2. Tag and push:
+1. Set `__version__ = "1.4"` in [`organiser/__init__.py`](organiser/__init__.py).
+   The app compares this with the newest release to decide whether to show
+   the update notice.
+2. Add a `## v1.4` section at the top of [`CHANGELOG.md`](CHANGELOG.md),
+   written for the people who use the app. It becomes the release notes
+   (`python scripts/release_notes.py v1.4` shows how they will look). Commit
+   both changes.
+3. Tag and push:
 
    ```
    git tag v1.4
@@ -472,6 +476,7 @@ organiser/
   icon.py                    draws the app icon
   config.py                  settings file and data folder
 scripts/make_demo_folder.py  creates a messy folder to try the app on
+scripts/release_notes.py     one version's notes from CHANGELOG.md, for GitHub
 tests/test_organiser.py      tests
 build.bat                    builds the Windows exe and installer
 build_mac.sh                 builds the Mac app and disk image
