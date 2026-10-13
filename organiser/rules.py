@@ -12,7 +12,9 @@ Two kinds of rule:
 
 from __future__ import annotations
 
+import fnmatch
 import os
+import re
 import sys
 
 TYPE_RULES: dict[str, str] = {}
@@ -113,6 +115,17 @@ SKIP_EXTENSIONS = {
 SKIP_NAMES = {"desktop.ini", "thumbs.db", ".ds_store", "icon\r"}
 
 FALLBACK = "Other"
+ARCHIVE = "Archive"
+
+#: Name rules offered with one click in Custom rules: (button, words, folder).
+SUGGESTED_NAME_RULES = (
+    ("Receipts", "invoice, receipt", "Documents/Receipts"),
+    ("Statements", "statement, payslip", "Documents/Finance"),
+    ("Travel", "ticket, boarding pass, booking, itinerary", "Documents/Travel"),
+    ("CVs", "cv, resume", "Documents/CV"),
+    ("Contracts", "contract, agreement", "Documents/Contracts"),
+    ("Wallpapers", "wallpaper", "Pictures/Wallpapers"),
+)
 
 
 def split_extension(filename: str) -> str:
@@ -132,8 +145,52 @@ def should_skip(filename: str) -> bool:
     return split_extension(filename) in SKIP_EXTENSIONS
 
 
-def destination_for(filename: str, overrides: dict[str, str] | None = None) -> str:
-    """Return the relative folder a file should live in, e.g. ``Apps/Blender``."""
+def _words(text: str) -> list[str]:
+    return [word for word in re.split(r"[^0-9a-z]+", text.lower()) if word]
+
+
+def _word_matches(word: str, wanted: str) -> bool:
+    """Whole word or plural; longer terms may also start a longer word."""
+    return word in (wanted, wanted + "s", wanted + "es") or (
+        len(wanted) >= 4 and word.startswith(wanted))
+
+
+def name_matches(pattern: str, filename: str) -> bool:
+    """Does *filename* match a name rule's *pattern*?
+
+    The pattern is one or more terms separated by commas; any one matching is
+    enough. A term like ``boarding pass`` matches those words in a row in the
+    name, so ``invoice`` catches ``Invoices_2026.pdf`` but not
+    ``reinvoiced.pdf``. Terms of four letters or more also match the start of
+    a longer word (``statement`` in ``statements2026``). A term with ``*`` or
+    ``?`` is a wildcard over the whole name instead (``IMG_*.jpg``).
+    """
+    name = filename.lower()
+    words = _words(os.path.splitext(name)[0])
+    for term in (part.strip() for part in pattern.split(",")):
+        if not term:
+            continue
+        if "*" in term or "?" in term:
+            if fnmatch.fnmatchcase(name, term.lower()):
+                return True
+            continue
+        wanted = _words(term)
+        for start in range(len(words) - len(wanted) + 1):
+            if wanted and all(_word_matches(words[start + i], w) for i, w in enumerate(wanted)):
+                return True
+    return False
+
+
+def destination_for(filename: str, overrides: dict[str, str] | None = None,
+                    name_rules=None) -> str:
+    """Return the relative folder a file should live in, e.g. ``Apps/Blender``.
+
+    The user's name rules come first (the first match wins), then their file
+    type rules, then the built-in ones.
+    """
+    for pattern, folder in name_rules or ():
+        if name_matches(pattern, filename):
+            return folder
     ext = split_extension(filename)
     if overrides and ext in overrides:
         return overrides[ext]
@@ -146,16 +203,37 @@ def destination_for(filename: str, overrides: dict[str, str] | None = None) -> s
     return FALLBACK
 
 
-def known_destinations(overrides: dict[str, str] | None = None) -> list[str]:
+def known_destinations(overrides: dict[str, str] | None = None, name_rules=None) -> list[str]:
     """Every folder the rules can produce, for ignoring on a re-scan."""
     seen = {d for d in list(TYPE_RULES.values()) + list(APP_RULES.values()) if d}
     seen.update((overrides or {}).values())
-    seen.add(FALLBACK)
+    seen.update(folder for _pattern, folder in name_rules or ())
+    seen.update((FALLBACK, ARCHIVE))
     tops = {d.split("/")[0] for d in seen}
     return sorted(seen | tops)
 
 
 _BAD_FOLDER_CHARS = set('<>:"|?*')
+
+
+def clean_name_rule(pattern: str, folder: str) -> tuple[str, str]:
+    """Validate a name rule, returning ``("invoice, receipt", "Documents/Receipts")``."""
+    terms = [term.strip() for term in pattern.split(",") if term.strip()]
+    if not terms or not any(_words(term) or "*" in term for term in terms):
+        raise ValueError("Type a word that appears in the file names, such as invoice")
+    return ", ".join(terms), clean_folder(folder)
+
+
+def clean_folder(folder: str) -> str:
+    """A safe folder inside the one being tidied, like ``Documents/Receipts``."""
+    parts = [part.strip() for part in folder.replace("\\", "/").split("/")]
+    parts = [part for part in parts if part]
+    if not parts:
+        raise ValueError("Type a folder such as Documents/Receipts")
+    for part in parts:
+        if part in (".", "..") or any(c in _BAD_FOLDER_CHARS for c in part) or part.endswith("."):
+            raise ValueError("'{}' can't be used in a folder name".format(part))
+    return "/".join(parts)
 
 
 def clean_rule(extension: str, folder: str) -> tuple[str, str]:
@@ -167,11 +245,4 @@ def clean_rule(extension: str, folder: str) -> tuple[str, str]:
     ext = extension.strip().lstrip(".").lower()
     if not ext or any(c in ext for c in " /\\.") or any(c in _BAD_FOLDER_CHARS for c in ext):
         raise ValueError("Type an extension such as pdf or .blend")
-    parts = [part.strip() for part in folder.replace("\\", "/").split("/")]
-    parts = [part for part in parts if part]
-    if not parts:
-        raise ValueError("Type a folder such as Documents/Receipts")
-    for part in parts:
-        if part in (".", "..") or any(c in _BAD_FOLDER_CHARS for c in part) or part.endswith("."):
-            raise ValueError("'{}' can't be used in a folder name".format(part))
-    return ext, "/".join(parts)
+    return ext, clean_folder(folder)

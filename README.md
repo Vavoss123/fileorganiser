@@ -38,7 +38,10 @@ nothing is ever permanently deleted.
 - Points out files that look like different versions of the same thing, such
   as `essay.docx` and `essay (1).docx`.
 - Flags installers that haven't been touched for 30 days.
-- Your own rules, for example `.pdf` to `Documents/Receipts`.
+- Your own rules, by file type (`.pdf` to `Documents/Receipts`) or by words in
+  the name (anything with "invoice" in it to `Documents/Receipts`).
+- Can move files you haven't touched for months into an Archive folder.
+- Updates itself in one click when a new version is out.
 - Optional year or month folders for photos and videos.
 - Can tidy automatically when you sign in, or keep tidying from the system tray.
 - A graph view of the plan, like Obsidian's, with a before/after animation.
@@ -143,7 +146,9 @@ shows the **Activity** tab. The app remembers whether they're open.
 | Look for duplicate files | Compares file contents. Turn off to make scans of huge folders faster. |
 | Sort unknown types into 'Other' | Off leaves files with unknown extensions where they are. |
 | Use my Windows libraries | Moves pictures to `~\Pictures`, videos to `~\Videos`, audio to `~\Music` and documents to `~\Documents` instead of subfolders of the scanned folder. Everything else stays in the scanned folder. |
-| Custom rules… | Choose your own folder for any file type. See below. |
+| Archive old files | Off, or files not changed for 3 months, 6 months or a year go to `Archive/<their usual folder>` inside the folder being tidied. Installers are left out, since they're offered for the bin instead. |
+| Tell me when there's a new version | See [Updates](#updates). **Check now** looks straight away. |
+| Custom rules… | Choose your own folder by words in the name or by file type. See below. |
 
 ### Files to move tab
 
@@ -247,11 +252,26 @@ why, and anything it couldn't read.
 
 ### Updates
 
-When a newer version is published on GitHub, a link saying so appears at the
-top of the window; click it to open the download page. The check is one
-request to GitHub's public releases page each time the app opens. Nothing
-about you or your files is sent. Turn it off with **Tell me when there's a
-new version** under **More options**.
+When a newer version is published on GitHub, an **Update to …** button appears
+at the top of the window. It shows what's new and offers:
+
+- **Update now** downloads the new version, checks it against the SHA-256
+  checksum GitHub publishes for it, installs it and restarts the app. Your
+  settings and undo history are kept. The installed Windows app runs the new
+  installer quietly; the stand-alone `FileOrganiser.exe` swaps itself for the
+  new one; the Mac app copies the new one over itself from the disk image.
+- **Later** asks again next time.
+- **Skip this version** stays quiet until the one after.
+
+A download that doesn't match its checksum, or doesn't come from this
+project's releases, is never installed. If the app can't update itself (run
+from source, or from a folder it can't write to), the download page opens
+instead.
+
+The check is one request to GitHub's public releases page each time the app
+opens. Nothing about you or your files is sent. Turn it off with **Tell me
+when there's a new version** under **More options**, or look yourself with
+**Check now**.
 
 ### Undo
 
@@ -262,11 +282,22 @@ left where they are, and the log says so.
 
 ### Custom rules
 
-**Custom rules…** opens a list of your own extension-to-folder rules. Type an
-extension (`pdf` or `.pdf`) and a folder (`Documents/Receipts`), then press
-**Add / update** and **Save**. Your rules take priority over the built-in ones.
-Folders are always inside the folder being tidied. Drive letters and `..` are
-not allowed.
+**Custom rules…** has two tabs. Your rules take priority over the built-in
+ones, and folders are always inside the folder being tidied (drive letters and
+`..` aren't allowed). Press **Save** when you're done.
+
+**By name** sends files whose names contain certain words to a folder,
+whatever kind of file they are. Type the words, separated by commas (any one
+is enough), and a folder, then press **Add / update**. `invoice, receipt` to
+`Documents/Receipts` catches `Invoice 2026-03.pdf` and `amazon_receipts.png`,
+but not `reinvoiced.pdf`. Several words in a row (`boarding pass`) must appear
+together. Use `*` for anything, as in `IMG_*.jpg`. The **Ideas** buttons add
+ready-made rules for receipts, statements, travel, CVs, contracts and
+wallpapers. Name rules are checked first, top to bottom; **Move up** and
+**Move down** change the order.
+
+**By file type** sends an extension (`pdf` or `.pdf`) to a folder of your
+choice (`Documents/Receipts`).
 
 ## Where files go
 
@@ -354,7 +385,8 @@ A few settings have no control in the app. You can change them in
 | --- | --- | --- |
 | `settle_seconds` | `120` | Files changed more recently than this are left alone. |
 | `installer_age_days` | `30` | How old an installer must be to appear under Old installers. |
-| `overrides` | `{}` | Your custom rules, e.g. `{"pdf": "Documents/Receipts"}`. Easier to edit with **Custom rules…**. |
+| `overrides` | `{}` | Your file type rules, e.g. `{"pdf": "Documents/Receipts"}`. Easier to edit with **Custom rules…**. |
+| `name_rules` | `[]` | Your name rules, e.g. `[["invoice, receipt", "Documents/Receipts"]]`, checked in order. Easier to edit with **Custom rules…**. |
 | `welcomed` | `false` | Set back to `false` to see the welcome screen at the next start. |
 
 ## Command line

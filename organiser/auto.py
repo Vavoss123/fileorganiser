@@ -20,7 +20,8 @@ def scan_and_plan(settings: dict, progress=None) -> tuple[scan.ScanResult, plan_
     result = scan.scan(
         settings["folder"],
         max_depth=settings["max_depth"],
-        ignore_folders=set(rules.known_destinations(settings.get("overrides"))),
+        ignore_folders=set(rules.known_destinations(settings.get("overrides"),
+                                                    settings.get("name_rules"))),
         progress=progress,
     )
     built = plan_module.build_plan(
@@ -30,6 +31,8 @@ def scan_and_plan(settings: dict, progress=None) -> tuple[scan.ScanResult, plan_
         include_other=settings["include_other"],
         settle_seconds=settings.get("settle_seconds", 0),
         date_folders=settings.get("date_folders", "off"),
+        name_rules=settings.get("name_rules"),
+        archive_days=settings.get("archive_days", 0),
     )
     return result, built
 

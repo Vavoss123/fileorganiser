@@ -27,6 +27,12 @@ from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
 DATE_CHOICES = {"off": "Off", "year": "By year", "month": "By year and month"}
+ARCHIVE_CHOICES = {
+    0: "Off",
+    90: "Not changed for 3 months",
+    180: "Not changed for 6 months",
+    365: "Not changed for a year",
+}
 STARTUP_CHOICES = {
     "off": "Do nothing",
     "auto": "Tidy once",
@@ -184,6 +190,9 @@ class OrganiserApp(ttk.Frame):
         self.show_graph_after_scan = False
         self.cancel_scan_event = threading.Event()
         self.updates_var = tk.BooleanVar(value=bool(self.settings.get("check_updates", True)))
+        self.archive_var = tk.StringVar(value=ARCHIVE_CHOICES.get(
+            int(self.settings.get("archive_days") or 0), ARCHIVE_CHOICES[0]))
+        self.release: updates.Release | None = None
         accent = self.settings.get("accent")
         self.accent_var = tk.StringVar(
             value=accent if accent in theme.ACCENTS else theme.DEFAULT_ACCENT
@@ -279,7 +288,9 @@ class OrganiserApp(ttk.Frame):
 
         right = ttk.Frame(header)
         right.grid(row=0, column=2, sticky="ne")
-        self.update_link = ttk.Label(right, style="Link.TLabel", cursor="hand2")
+        self.update_link = ttk.Button(right, style="Accent.TButton", command=self.open_update)
+        Tooltip(self.update_link, "A newer version is out. See what's new and update in "
+                                  "one click.")
         help_button = ttk.Button(right, text="?  How it works", style="Small.TButton",
                                  command=self.show_welcome)
         help_button.pack(side="right")
@@ -289,18 +300,41 @@ class OrganiserApp(ttk.Frame):
         look.pack(side="right", padx=(0, 6))
         return header
 
-    def _update_worker(self) -> None:
+    def _update_worker(self, asked: bool = False) -> None:
         found = updates.newer_release()
-        if found:
-            self.events.put(("update", found))
+        if found or asked:
+            self.events.put(("update", (found, asked)))
 
-    def _show_update(self, tag: str, url: str) -> None:
-        self.update_link.configure(text="✦ Version {} is out, get it here".format(
-            tag.lstrip("v")))
-        self.update_link.bind("<Button-1>", lambda _e: webbrowser.open(url))
-        self.update_link.pack(side="right", padx=(0, 14))
-        Tooltip(self.update_link, "Opens the download page on GitHub. You're on version "
-                                  "{}.".format(updates.__version__))
+    def _show_update(self, release: updates.Release | None, asked: bool) -> None:
+        if release is None:
+            if asked:
+                messagebox.showinfo("File Organiser", "You have the newest version ({}), "
+                                    "or GitHub couldn't be reached.".format(updates.__version__))
+            return
+        self.release = release
+        if asked:
+            self.open_update()
+            return
+        if self.settings.get("skipped_version") == release.tag:
+            return  # the user said not to bother them about this one
+        self.update_link.configure(text="Update to {}".format(release.version))
+        self.update_link.pack(side="right", padx=(0, 8))
+
+    def open_update(self) -> None:
+        if self.release is not None and not self._working():
+            dialog = UpdateDialog(self.master, self, self.release)
+            self.master.wait_window(dialog)
+
+    def check_for_updates(self) -> None:
+        threading.Thread(target=self._update_worker, args=(True,), daemon=True).start()
+
+    def hide_update(self) -> None:
+        self.update_link.pack_forget()
+
+    def quit_for_update(self) -> None:
+        """Save and close, so the new version can take this one's place."""
+        config.save(self.current_settings())
+        self.master.destroy()
 
     def show_welcome(self) -> None:
         if self.welcome is not None:
@@ -434,6 +468,20 @@ class OrganiserApp(ttk.Frame):
                                       variable=self.updates_var, style="Card.TCheckbutton")
         updates_box.grid(row=3, column=2, columnspan=2, sticky="w", pady=(10, 0),
                          padx=(22, 0))
+        check_now = ttk.Button(options, text="Check now", style="Small.TButton",
+                               command=self.check_for_updates)
+        check_now.grid(row=4, column=2, sticky="w", pady=(6, 0), padx=(22, 0))
+        Tooltip(check_now, "Look for a newer version right away. You have version {}.".format(
+            updates.__version__))
+
+        archive = ttk.Label(options, text="Archive old files", style="Card.TLabel")
+        archive.grid(row=3, column=4, sticky="w", padx=(22, 8), pady=(10, 0))
+        Tooltip(archive, "Files you haven't changed for a long time go into an Archive "
+                         "folder (inside the one being tidied), sorted the same way. Out of "
+                         "the way, but nothing is deleted.")
+        ttk.Combobox(options, textvariable=self.archive_var, values=list(ARCHIVE_CHOICES.values()),
+                     state="readonly", width=24).grid(row=3, column=5, sticky="w",
+                                                      pady=(10, 0))
         Tooltip(updates_box, "Once each time the app opens, ask GitHub whether a newer "
                              "version is out. Nothing about you or your files is sent.")
         options.columnconfigure(5, weight=1)
@@ -713,15 +761,15 @@ class OrganiserApp(ttk.Frame):
         self.duplicate_tree.tag_configure("extra", foreground=palette["bad"])
 
     def edit_rules(self) -> None:
-        dialog = RulesDialog(self.master, self.settings.get("overrides", {}))
+        dialog = RulesDialog(self.master, self.settings.get("overrides", {}),
+                             self.settings.get("name_rules", []))
         self.master.wait_window(dialog)
         if dialog.result is not None:
-            self.settings["overrides"] = dialog.result
+            self.settings["overrides"], self.settings["name_rules"] = dialog.result
             config.save(self.current_settings())
-            self.log("Custom rules: {}".format(
-                ", ".join(".{} → {}".format(e, f) for e, f in sorted(dialog.result.items()))
-                or "none"
-            ))
+            described = ["names with {} → {}".format(p, f) for p, f in dialog.result[1]]
+            described += [".{} → {}".format(e, f) for e, f in sorted(dialog.result[0].items())]
+            self.log("Custom rules: {}".format(", ".join(described) or "none"))
 
     def _change_startup(self) -> None:
         current = startup.current_mode()
@@ -771,6 +819,8 @@ class OrganiserApp(ttk.Frame):
             "graph": self.graph_view.settings(),
             "advanced": bool(self.advanced_var.get()),
             "check_updates": bool(self.updates_var.get()),
+            "archive_days": next(
+                (k for k, v in ARCHIVE_CHOICES.items() if v == self.archive_var.get()), 0),
         })
         return settings
 
@@ -1547,66 +1597,178 @@ class HistoryDialog(tk.Toplevel):
 
 
 class RulesDialog(tk.Toplevel):
-    """Edit the user's own extension → folder rules, which beat the built-ins."""
+    """The user's own rules, which beat the built-in ones: by words in a file's
+    name (checked first), and by file type."""
 
-    def __init__(self, master: tk.Misc, overrides: dict[str, str]) -> None:
+    def __init__(self, master: tk.Misc, overrides: dict[str, str], name_rules) -> None:
         super().__init__(master)
         self.title("Custom rules")
         self.transient(master)
         self.resizable(True, True)
-        self.minsize(460, 360)
+        self.minsize(560, 460)
         self.rules = dict(overrides)
-        self.result: dict[str, str] | None = None
+        self.name_rules = [tuple(rule) for rule in name_rules or ()]
+        self.result: tuple[dict[str, str], list[list[str]]] | None = None
+        folders = rules.known_destinations()
 
         page = ttk.Frame(self, padding=PAD)
         page.pack(fill="both", expand=True)
         page.columnconfigure(0, weight=1)
-        page.rowconfigure(1, weight=1)
-        ttk.Label(
-            page,
-            text="Send a file type somewhere of your choosing. These win over the "
-            "built-in rules. Folders are inside the folder being tidied.",
-            wraplength=430,
-        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        page.rowconfigure(0, weight=1)
+        tabs = ttk.Notebook(page)
+        tabs.grid(row=0, column=0, sticky="nsew")
+        tabs.add(self._build_names(tabs, folders), text="By name")
+        tabs.add(self._build_types(tabs, folders), text="By file type")
 
-        self.tree = ttk.Treeview(
-            page, columns=("folder",), show="tree headings", height=8, selectmode="browse"
-        )
-        self.tree.heading("#0", text="Extension")
-        self.tree.heading("folder", text="Goes to")
+        buttons = ttk.Frame(page)
+        buttons.grid(row=1, column=0, sticky="ew", pady=(10, 0))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Save", command=self._save, style="Accent.TButton").pack(
+            side="right", padx=6)
+
+        self._refresh()
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.grab_set()
+
+    # ------------------------------------------------------------ by name
+
+    def _build_names(self, parent: ttk.Notebook, folders: list[str]) -> ttk.Frame:
+        tab = ttk.Frame(parent, padding=10)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(2, weight=1)
+        ttk.Label(
+            tab, wraplength=500, justify="left",
+            text="Send files whose names contain certain words to a folder of your choice, "
+                 "whatever their type. Separate words with commas; any one is enough. "
+                 "These are checked first, top to bottom.",
+        ).grid(row=0, column=0, sticky="w")
+
+        ideas = ttk.Frame(tab)
+        ideas.grid(row=1, column=0, sticky="ew", pady=(8, 8))
+        ttk.Label(ideas, text="Ideas:", style="Muted.TLabel").pack(side="left")
+        for label, words, folder in rules.SUGGESTED_NAME_RULES:
+            idea = ttk.Button(ideas, text="+ " + label, style="Small.TButton",
+                              command=lambda w=words, f=folder: self._add_name(w, f))
+            idea.pack(side="left", padx=(6, 0))
+            Tooltip(idea, "Files with {} in the name go to {}.".format(
+                " or ".join('"{}"'.format(w.strip()) for w in words.split(",")), folder))
+
+        self.name_tree = ttk.Treeview(tab, columns=("folder",), show="tree headings",
+                                      height=7, selectmode="browse")
+        self.name_tree.heading("#0", text="Names containing", anchor="w")
+        self.name_tree.heading("folder", text="Go to", anchor="w")
+        self.name_tree.column("#0", width=260)
+        self.name_tree.grid(row=2, column=0, sticky="nsew")
+        self.name_tree.bind("<<TreeviewSelect>>", self._on_name_select)
+
+        form = ttk.Frame(tab)
+        form.grid(row=3, column=0, sticky="ew", pady=(8, 0))
+        form.columnconfigure(1, weight=1)
+        form.columnconfigure(3, weight=1)
+        ttk.Label(form, text="Words").grid(row=0, column=0, padx=(0, 6))
+        self.words_var = tk.StringVar()
+        words = ttk.Entry(form, textvariable=self.words_var)
+        words.grid(row=0, column=1, sticky="ew")
+        Tooltip(words, "For example: invoice, receipt. Use * for anything, as in IMG_*.jpg")
+        ttk.Label(form, text="Go to").grid(row=0, column=2, padx=(12, 6))
+        self.name_folder_var = tk.StringVar()
+        ttk.Combobox(form, textvariable=self.name_folder_var, values=folders).grid(
+            row=0, column=3, sticky="ew")
+        actions = ttk.Frame(tab)
+        actions.grid(row=4, column=0, sticky="w", pady=(8, 0))
+        ttk.Button(actions, text="Add / update",
+                   command=lambda: self._add_name(self.words_var.get(),
+                                                  self.name_folder_var.get())).pack(side="left")
+        ttk.Button(actions, text="Remove", command=self._remove_name).pack(side="left", padx=6)
+        ttk.Button(actions, text="Move up", command=lambda: self._move_name(-1)).pack(side="left")
+        ttk.Button(actions, text="Move down", command=lambda: self._move_name(1)).pack(
+            side="left", padx=6)
+        words.focus_set()
+        return tab
+
+    def _add_name(self, words: str, folder: str) -> None:
+        try:
+            pattern, folder = rules.clean_name_rule(words, folder)
+        except ValueError as exc:
+            messagebox.showerror("Custom rules", str(exc), parent=self)
+            return
+        for index, (existing, _folder) in enumerate(self.name_rules):
+            if existing.lower() == pattern.lower():
+                self.name_rules[index] = (pattern, folder)
+                break
+        else:
+            self.name_rules.append((pattern, folder))
+        self._refresh()
+
+    def _selected_name(self) -> int | None:
+        selected = self.name_tree.selection()
+        return int(selected[0]) if selected else None
+
+    def _on_name_select(self, _event=None) -> None:
+        index = self._selected_name()
+        if index is not None:
+            self.words_var.set(self.name_rules[index][0])
+            self.name_folder_var.set(self.name_rules[index][1])
+
+    def _remove_name(self) -> None:
+        index = self._selected_name()
+        if index is not None:
+            del self.name_rules[index]
+            self.words_var.set("")
+            self.name_folder_var.set("")
+            self._refresh()
+
+    def _move_name(self, step: int) -> None:
+        index = self._selected_name()
+        if index is None or not 0 <= index + step < len(self.name_rules):
+            return
+        rules_ = self.name_rules
+        rules_[index], rules_[index + step] = rules_[index + step], rules_[index]
+        self._refresh()
+        self.name_tree.selection_set(str(index + step))
+
+    # ------------------------------------------------------- by file type
+
+    def _build_types(self, parent: ttk.Notebook, folders: list[str]) -> ttk.Frame:
+        tab = ttk.Frame(parent, padding=10)
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+        ttk.Label(
+            tab, wraplength=500, justify="left",
+            text="Send a file type somewhere of your choosing. These win over the "
+                 "built-in rules. Folders are inside the folder being tidied.",
+        ).grid(row=0, column=0, sticky="w", pady=(0, 8))
+        self.tree = ttk.Treeview(tab, columns=("folder",), show="tree headings", height=8,
+                                 selectmode="browse")
+        self.tree.heading("#0", text="Extension", anchor="w")
+        self.tree.heading("folder", text="Goes to", anchor="w")
         self.tree.column("#0", width=110, stretch=False)
-        self.tree.grid(row=1, column=0, columnspan=2, sticky="nsew")
+        self.tree.grid(row=1, column=0, sticky="nsew")
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
 
-        form = ttk.Frame(page)
-        form.grid(row=2, column=0, columnspan=2, sticky="ew", pady=8)
+        form = ttk.Frame(tab)
+        form.grid(row=2, column=0, sticky="ew", pady=8)
         form.columnconfigure(3, weight=1)
         ttk.Label(form, text="Extension").grid(row=0, column=0)
         self.ext_var = tk.StringVar()
-        ext_entry = ttk.Entry(form, textvariable=self.ext_var, width=10)
-        ext_entry.grid(row=0, column=1, padx=(6, 12))
+        ttk.Entry(form, textvariable=self.ext_var, width=10).grid(row=0, column=1, padx=(6, 12))
         ttk.Label(form, text="Goes to").grid(row=0, column=2)
         self.folder_var = tk.StringVar()
-        ttk.Combobox(
-            form, textvariable=self.folder_var, values=rules.known_destinations()
-        ).grid(row=0, column=3, sticky="ew", padx=(6, 0))
-
-        buttons = ttk.Frame(page)
-        buttons.grid(row=3, column=0, columnspan=2, sticky="ew")
-        ttk.Button(buttons, text="Add / update", command=self._add).pack(side="left")
-        ttk.Button(buttons, text="Remove", command=self._remove).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="right")
-        ttk.Button(buttons, text="Save", command=self._save).pack(side="right", padx=6)
-
-        self._refresh()
-        ext_entry.focus_set()
-        self.bind("<Escape>", lambda _e: self.destroy())
-        self.grab_set()
+        ttk.Combobox(form, textvariable=self.folder_var, values=folders).grid(
+            row=0, column=3, sticky="ew", padx=(6, 0))
+        actions = ttk.Frame(tab)
+        actions.grid(row=3, column=0, sticky="w")
+        ttk.Button(actions, text="Add / update", command=self._add).pack(side="left")
+        ttk.Button(actions, text="Remove", command=self._remove).pack(side="left", padx=6)
+        return tab
 
     def _refresh(self) -> None:
         self.tree.delete(*self.tree.get_children())
         for ext, folder in sorted(self.rules.items()):
             self.tree.insert("", "end", iid=ext, text="." + ext, values=(folder,))
+        self.name_tree.delete(*self.name_tree.get_children())
+        for index, (pattern, folder) in enumerate(self.name_rules):
+            self.name_tree.insert("", "end", iid=str(index), text=pattern, values=(folder,))
 
     def _on_select(self, _event=None) -> None:
         selected = self.tree.selection()
@@ -1633,8 +1795,132 @@ class RulesDialog(tk.Toplevel):
         self._refresh()
 
     def _save(self) -> None:
-        self.result = self.rules
+        self.result = (self.rules, [list(rule) for rule in self.name_rules])
         self.destroy()
+
+
+class UpdateDialog(tk.Toplevel):
+    """A newer version is out: what's new, and Update now / Later / Skip."""
+
+    def __init__(self, master: tk.Misc, app: "OrganiserApp", release: updates.Release) -> None:
+        super().__init__(master)
+        self.app, self.release = app, release
+        self.kind = updates.install_kind()
+        self.installable = updates.can_install(release, self.kind)
+        self.events: queue.Queue = queue.Queue()
+        self.title("Update available")
+        self.transient(master)
+        self.resizable(False, False)
+        self.configure(background=app.palette["bg"])
+
+        page = ttk.Frame(self, padding=22)
+        page.pack(fill="both", expand=True)
+        ttk.Label(page, text="Version {} is ready".format(release.version),
+                  style="Title.TLabel").pack(anchor="w")
+        ttk.Label(page, style="Muted.TLabel",
+                  text="You have version {}. Your settings and undo history are kept.".format(
+                      updates.__version__)).pack(anchor="w", pady=(2, 12))
+
+        ttk.Label(page, text="What's new", font=(theme.FAMILY, 11, "bold")).pack(anchor="w")
+        notes = tk.Text(page, width=64, height=14, wrap="word", relief="flat",
+                        borderwidth=0, padx=12, pady=10, font=(theme.FAMILY, 10),
+                        background=app.palette["surface"], foreground=app.palette["text"],
+                        highlightthickness=1, highlightbackground=app.palette["border"])
+        notes.insert("1.0", updates.plain_notes(release.notes) or "See the release page.")
+        notes.configure(state="disabled")
+        notes.pack(fill="both", pady=(6, 12))
+
+        self.status = ttk.Label(page, style="Muted.TLabel", text=(
+            "" if self.installable else
+            "This copy can't update itself, so the download page will open."))
+        self.status.pack(anchor="w")
+        self.bar = ttk.Progressbar(page, mode="determinate", length=300)
+
+        buttons = ttk.Frame(page)
+        buttons.pack(fill="x", pady=(12, 0))
+        self.update_button = ttk.Button(
+            buttons, style="Accent.TButton", command=self._update,
+            text="Update now" if self.installable else "Open download page")
+        self.update_button.pack(side="right")
+        self.later_button = ttk.Button(buttons, text="Later", command=self.destroy)
+        self.later_button.pack(side="right", padx=6)
+        self.skip_button = ttk.Button(buttons, text="Skip this version", command=self._skip)
+        self.skip_button.pack(side="left")
+
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        x = master.winfo_rootx() + (master.winfo_width() - self.winfo_reqwidth()) // 2
+        y = master.winfo_rooty() + (master.winfo_height() - self.winfo_reqheight()) // 3
+        self.geometry("+{}+{}".format(max(x, 0), max(y, 0)))
+        self.update_button.focus_set()
+        self.grab_set()
+
+    def _skip(self) -> None:
+        self.app.settings["skipped_version"] = self.release.tag
+        config.save(self.app.current_settings())
+        self.app.hide_update()
+        self.destroy()
+
+    def _update(self) -> None:
+        if not self.installable:
+            webbrowser.open(self.release.page)
+            self.destroy()
+            return
+        for button in (self.update_button, self.later_button, self.skip_button):
+            button.configure(state="disabled")
+        self.bar.pack(anchor="w", pady=(6, 0), after=self.status)
+        self.status.configure(text="Downloading…")
+        asset = self.release.assets[updates.asset_for(self.kind)]
+        threading.Thread(target=self._download, args=(asset,), daemon=True).start()
+        self.after(100, self._poll)
+
+    def _download(self, asset: updates.Asset) -> None:
+        try:
+            path = updates.download(
+                asset, progress=lambda done, total: self.events.put(("progress", (done, total))))
+            self.events.put(("downloaded", path))
+        except updates.UpdateError as exc:
+            self.events.put(("error", str(exc)))
+        except Exception as exc:  # never leave the dialog stuck on "Downloading"
+            self.events.put(("error", "The update failed: {}".format(exc)))
+
+    def _poll(self) -> None:
+        try:
+            while True:
+                kind, payload = self.events.get_nowait()
+                if kind == "progress":
+                    done, total = payload
+                    self.bar.configure(maximum=max(total, 1), value=done)
+                    self.status.configure(text="Downloading… {} of {}".format(
+                        human_size(done), human_size(total)))
+                elif kind == "downloaded":
+                    self._install(payload)
+                    return
+                elif kind == "error":
+                    self._failed(payload)
+                    return
+        except queue.Empty:
+            pass
+        self.after(100, self._poll)
+
+    def _install(self, path: str) -> None:
+        self.status.configure(text="Installing. File Organiser will restart in a moment…")
+        self.update_idletasks()
+        try:
+            updates.install(path, self.kind)
+        except updates.UpdateError as exc:
+            self._failed(str(exc))
+            return
+        self.app.quit_for_update()
+
+    def _failed(self, message: str) -> None:
+        self.bar.pack_forget()
+        self.status.configure(text=message)
+        self.update_button.configure(state="normal", text="Open download page",
+                                     command=lambda: (webbrowser.open(self.release.page),
+                                                      self.destroy()))
+        self.later_button.configure(state="normal")
+        self.skip_button.configure(state="normal")
 
 
 def _sharpen_on_high_dpi() -> None:
@@ -1697,6 +1983,7 @@ def main() -> None:
         tray.run()
         return
     _sharpen_on_high_dpi()
+    updates.clean_up()
     root = tk.Tk()
     root.title("File Organiser")
     root.geometry("1180x840")

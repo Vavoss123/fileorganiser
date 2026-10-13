@@ -95,6 +95,8 @@ def build_plan(
     settle_seconds: float = 0,
     now: float | None = None,
     date_folders: str = "off",
+    name_rules=None,
+    archive_days: float = 0,
 ) -> Plan:
     """Decide where each scanned file should go.
 
@@ -108,6 +110,12 @@ def build_plan(
 
     ``date_folders`` ("off", "year" or "month") files photos and videos under
     the date they were last modified, e.g. ``Pictures/2026/10``.
+
+    ``name_rules`` are the user's ``(words, folder)`` rules, checked first.
+
+    With ``archive_days`` set, files not changed for that many days go to
+    ``Archive/<their usual folder>`` inside the folder being tidied, out of
+    the way but kept. Installers are left out: they are offered for the bin.
     """
     home = home or os.path.expanduser("~")
     moves: list[Move] = []
@@ -120,12 +128,17 @@ def build_plan(
         if settle_seconds and now - info.mtime < settle_seconds:
             skipped.append((info.path, "changed in the last few minutes, may still be downloading"))
             continue
-        bucket = rules.destination_for(info.name, overrides)
+        bucket = rules.destination_for(info.name, overrides, name_rules)
         if bucket == rules.FALLBACK and not include_other:
             already_tidy.append(info)
             continue
 
-        if route_to_libraries and bucket in LIBRARY_ROOTS:
+        archived = bool(archive_days) and now - info.mtime > archive_days * 86400 \
+            and bucket.split("/")[0] != "Installers"
+        if archived:
+            bucket = rules.ARCHIVE + "/" + bucket
+            base = os.path.join(result.root, *bucket.split("/"))
+        elif route_to_libraries and bucket in LIBRARY_ROOTS:
             library = LIBRARY_ROOTS[bucket]
             tail = bucket.split("/", 1)[1] if "/" in bucket else ""
             base = os.path.join(home, library, tail) if tail else os.path.join(home, library)

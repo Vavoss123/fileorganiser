@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -634,6 +635,135 @@ class MacTests(unittest.TestCase):
             save_icns(path)
             with open(path, "rb") as handle:
                 self.assertEqual(handle.read(4), b"icns")
+
+class NameRuleTests(unittest.TestCase):
+    RULES = [("invoice, receipt", "Documents/Receipts"), ("boarding pass", "Documents/Travel"),
+             ("cv", "Documents/CV"), ("IMG_*.jpg", "Pictures/Phone")]
+
+    def where(self, name):
+        return rules.destination_for(name, None, self.RULES)
+
+    def test_words_in_the_name_pick_the_folder(self):
+        self.assertEqual(self.where("Invoice 2026-03.pdf"), "Documents/Receipts")
+        self.assertEqual(self.where("amazon_receipts.png"), "Documents/Receipts")
+        self.assertEqual(self.where("BA boarding-pass.pdf"), "Documents/Travel")
+        self.assertEqual(self.where("My CV.docx"), "Documents/CV")
+        self.assertEqual(self.where("IMG_0042.jpg"), "Pictures/Phone")
+
+    def test_parts_of_other_words_do_not_count(self):
+        self.assertEqual(self.where("reinvoiced.pdf"), "Documents")
+        self.assertEqual(self.where("cvxyz.pdf"), "Documents")
+        self.assertEqual(self.where("boarding.pdf"), "Documents")  # the whole phrase is needed
+
+    def test_name_rules_beat_type_rules(self):
+        self.assertEqual(rules.destination_for("receipt.png", {"png": "Pictures/Other"},
+                                               self.RULES), "Documents/Receipts")
+
+    def test_name_rule_validation(self):
+        self.assertEqual(rules.clean_name_rule(" invoice ,receipt,", "Documents\\Receipts"),
+                         ("invoice, receipt", "Documents/Receipts"))
+        for words, folder in (("", "Documents"), (" , ", "Documents"), ("tax", "../out")):
+            with self.assertRaises(ValueError):
+                rules.clean_name_rule(words, folder)
+
+    def test_name_rule_folders_are_skipped_on_rescan(self):
+        self.assertIn("Documents/Receipts", rules.known_destinations(None, self.RULES))
+
+
+class ArchiveTests(unittest.TestCase):
+    def test_old_files_go_to_the_archive_and_new_ones_do_not(self):
+        with tempfile.TemporaryDirectory() as root:
+            old = write(root, "old.pdf")
+            write(root, "new.pdf")
+            old_setup = write(root, "setup.exe")
+            year_ago = time.time() - 400 * 86400
+            for path in (old, old_setup):
+                os.utime(path, (year_ago, year_ago))
+            built = plan_module.build_plan(scan.scan(root), archive_days=180)
+            where = {move.info.name: move.bucket for move in built.moves}
+            self.assertEqual(where["old.pdf"], "Archive/Documents")
+            self.assertEqual(where["new.pdf"], "Documents")
+            self.assertEqual(where["setup.exe"], "Installers")  # offered for the bin instead
+            self.assertIn("Archive", rules.known_destinations())
+
+    def test_archive_is_off_by_default(self):
+        with tempfile.TemporaryDirectory() as root:
+            old = write(root, "old.pdf")
+            os.utime(old, (0, 0))
+            built = plan_module.build_plan(scan.scan(root))
+            self.assertEqual(built.moves[0].bucket, "Documents")
+
+
+class UpdaterTests(unittest.TestCase):
+    PAYLOAD = b"new version"
+
+    def release(self, digest=None, url=None):
+        import hashlib
+
+        return updates.parse_release({
+            "tag_name": "v9.0", "html_url": "https://example.invalid", "body": "**New**",
+            "assets": [{
+                "name": "FileOrganiser.exe", "size": len(self.PAYLOAD),
+                "browser_download_url": url or updates.DOWNLOAD_PREFIX + "v9.0/FileOrganiser.exe",
+                "digest": digest if digest is not None
+                else "sha256:" + hashlib.sha256(self.PAYLOAD).hexdigest(),
+            }],
+        })
+
+    def fetch(self, release):
+        import io
+        from unittest import mock
+
+        class Response(io.BytesIO):
+            headers = {"Content-Length": str(len(UpdaterTests.PAYLOAD))}
+
+        folder = tempfile.mkdtemp()
+        self.addCleanup(__import__("shutil").rmtree, folder, True)
+        with mock.patch.object(updates.urllib.request, "urlopen",
+                               lambda *a, **k: Response(self.PAYLOAD)):
+            return updates.download(release.assets["FileOrganiser.exe"], folder=folder)
+
+    def test_a_matching_download_is_kept(self):
+        path = self.fetch(self.release())
+        with open(path, "rb") as handle:
+            self.assertEqual(handle.read(), self.PAYLOAD)
+
+    def test_a_download_with_the_wrong_checksum_is_refused_and_deleted(self):
+        with self.assertRaises(updates.UpdateError):
+            self.fetch(self.release(digest="sha256:" + "0" * 64))
+
+    def test_only_this_projects_releases_are_downloaded(self):
+        with self.assertRaises(updates.UpdateError):
+            self.fetch(self.release(url="https://evil.example/FileOrganiser.exe"))
+        self.assertFalse(updates.can_install(self.release(digest=""), "portable"))
+        self.assertTrue(updates.can_install(self.release(), "portable"))
+
+    def test_the_portable_exe_swaps_itself(self):
+        with tempfile.TemporaryDirectory() as folder:
+            current = write(folder, "FileOrganiser.exe", b"old")
+            downloaded = write(folder, "download.exe", b"new")
+            updates.replace_portable(current, downloaded)
+            with open(current, "rb") as handle:
+                self.assertEqual(handle.read(), b"new")
+            self.assertTrue(os.path.exists(current + ".old"))
+
+    def test_installed_and_portable_copies_are_told_apart(self):
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as local:
+            app_folder = os.path.join(local, "Programs", "File Organiser")
+            exe = write(app_folder, "FileOrganiser.exe")
+            with mock.patch.dict(os.environ, {"LOCALAPPDATA": local}):
+                self.assertEqual(updates.install_kind(exe, True, "win32"), "portable")
+                write(app_folder, "unins000.exe")
+                self.assertEqual(updates.install_kind(exe, True, "win32"), "installer")
+                self.assertIsNone(updates.install_kind(exe, False, "win32"))
+        self.assertEqual(updates.install_kind("/Applications/File Organiser.app/Contents/MacOS/"
+                                              "File Organiser", True, "darwin"), "mac")
+
+    def test_release_notes_lose_their_markdown(self):
+        self.assertEqual(updates.plain_notes("**Mac** support\n- `dmg` file"),
+                         "Mac support\n• dmg file")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

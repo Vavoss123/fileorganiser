@@ -3,7 +3,7 @@
 
 #define AppName "File Organiser"
 #ifndef AppVersion
-  #define AppVersion "1.3"
+  #define AppVersion "1.4"
 #endif
 #define AppExe "FileOrganiser.exe"
 
@@ -41,6 +41,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: 
 
 [Run]
 Filename: "{app}\{#AppExe}"; Description: "Open {#AppName}"; Flags: nowait postinstall skipifsilent
+; An update from inside the app installs silently; start the new version afterwards.
+Filename: "{app}\{#AppExe}"; Flags: nowait skipifnotsilent
 
 [UninstallRun]
 ; Stop the tray watcher, if running, so its exe can be removed.

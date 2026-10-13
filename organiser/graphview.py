@@ -45,6 +45,7 @@ GROUP_COLOURS = {
     "Code": "#98c379",
     "Apps": "#56b6c2",
     "Other": "#8a8f98",
+    "Archive": "#b8956a",
 }
 SPARE_COLOURS = ("#ff9e64", "#7aa2f7", "#9ece6a", "#2ac3de", "#bb9af7", "#e0af68",
                  "#73daca", "#f5a97f")
@@ -463,6 +464,8 @@ class GraphView(ttk.Frame):
         canvas.tag_raise("label")
         canvas.tag_raise("chrome")
         canvas.itemconfigure(self.empty, state="hidden" if self.graph.nodes else "normal")
+        # The hint is about using a map, so only show it once there is one.
+        canvas.itemconfigure(self.hint, state="normal" if self.graph.nodes else "hidden")
         message = ""
         if self.graph.truncated:
             message = ("Too many files open to draw one by one, so only folders are shown.\n"

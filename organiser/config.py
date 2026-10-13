@@ -15,6 +15,9 @@ DEFAULTS: dict = {
     "include_other": True,
     "find_duplicates": True,
     "overrides": {},          # extension -> destination folder
+    "name_rules": [],         # [words, destination folder], checked first
+    "archive_days": 0,        # files unchanged this long go to Archive (0: off)
+    "skipped_version": "",    # an update the user chose to skip
     "settle_seconds": 120,    # leave files this fresh alone
     "date_folders": "off",    # "off", "year" or "month" for photos and videos
     "installer_age_days": 30, # installers older than this are offered for the bin

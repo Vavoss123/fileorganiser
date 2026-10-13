@@ -2,6 +2,23 @@
 
 Each release's notes on GitHub come from its section below.
 
+## v1.4
+
+**Update in one click.** When a new version is out, an **Update to …** button
+appears at the top of the window. It shows what's new, then downloads,
+checks and installs the update and restarts the app. Your settings and undo
+history are kept. You can also choose **Later** or **Skip this version**, or
+look for one yourself with **Check now** under More options.
+
+**Rules by name.** Custom rules can now look at words in a file's name, not
+just its type: send anything with "invoice" or "receipt" in the name to
+Documents/Receipts, say, whatever kind of file it is. One-click ideas get you
+started: Receipts, Statements, Travel, CVs, Contracts and Wallpapers.
+
+**Archive old files.** Under More options, choose to move files you haven't
+changed for 3 months, 6 months or a year into an Archive folder. They're
+sorted the same way inside it, out of the way but never deleted.
+
 ## v1.3
 
 **File Organiser now runs on Mac.** Download `FileOrganiser-mac.dmg`, open it,
