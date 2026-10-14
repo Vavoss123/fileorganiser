@@ -18,7 +18,7 @@ os.environ["LOCALAPPDATA"] = _APPDATA.name
 from organiser import apply as apply_module
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup
 from organiser import graph as graph_module
-from organiser import updates
+from organiser import housekeeping, updates
 
 
 def write(folder: str, name: str, content: bytes = b"x") -> str:
@@ -764,6 +764,50 @@ class UpdaterTests(unittest.TestCase):
     def test_release_notes_lose_their_markdown(self):
         self.assertEqual(updates.plain_notes("**Mac** support\n- `dmg` file"),
                          "Mac support\n• dmg file")
+
+class HousekeepingTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = self.tmp.name
+
+    def test_old_undo_history_is_cleared_and_recent_kept(self):
+        old = write(self.root, "20250101-000000.jsonl")
+        undone = write(self.root, "20250101-000001.jsonl.undone")
+        recent = write(self.root, "20261001-000000.jsonl")
+        other = write(self.root, "notes.txt")
+        os.utime(old, (0, 0))
+        os.utime(undone, (0, 0))
+        os.utime(other, (0, 0))
+        removed = housekeeping.old_journals(180, self.root)
+        self.assertEqual(sorted(removed), sorted([old, undone]))
+        self.assertTrue(os.path.exists(recent))
+        self.assertTrue(os.path.exists(other))  # not ours to delete
+        self.assertEqual(housekeeping.old_journals(0, self.root), [])  # 0 keeps everything
+
+    def test_update_downloads_are_cleared_once_finished_with(self):
+        old = os.path.dirname(write(self.root, os.path.join("FileOrganiser-update-ab", "x.exe")))
+        fresh = os.path.dirname(write(self.root, os.path.join("FileOrganiser-update-cd", "y.exe")))
+        other = os.path.dirname(write(self.root, os.path.join("SomethingElse", "z.exe")))
+        os.utime(old, (0, 0))
+        self.assertEqual(housekeeping.update_downloads(self.root), [old])
+        self.assertTrue(os.path.exists(fresh))  # an installer may still be using it
+        self.assertTrue(os.path.exists(other))
+
+    def test_leftover_unpacked_copies_are_cleared_but_not_ours(self):
+        leftover = os.path.dirname(write(self.root, os.path.join("_MEI111", "python313.dll")))
+        current = os.path.dirname(write(self.root, os.path.join("_MEI222", "python313.dll")))
+        removed = housekeeping.unpacked_copies(self.root, current=current)
+        self.assertEqual(removed, [leftover])
+        self.assertFalse(os.path.exists(leftover))
+        self.assertTrue(os.path.exists(current))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows locks folders with open files")
+    def test_an_unpacked_copy_in_use_is_left_alone(self):
+        busy = write(self.root, os.path.join("_MEI333", "python313.dll"))
+        with open(busy, "rb"):  # like a running copy holding its DLL
+            self.assertEqual(housekeeping.unpacked_copies(self.root, current="elsewhere"), [])
+        self.assertTrue(os.path.exists(busy))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

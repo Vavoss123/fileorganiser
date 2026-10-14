@@ -18,6 +18,7 @@ DEFAULTS: dict = {
     "name_rules": [],         # [words, destination folder], checked first
     "archive_days": 0,        # files unchanged this long go to Archive (0: off)
     "skipped_version": "",    # an update the user chose to skip
+    "journal_days": 180,      # undo history older than this is cleared (0: keep all)
     "settle_seconds": 120,    # leave files this fresh alone
     "date_folders": "off",    # "off", "year" or "month" for photos and videos
     "installer_age_days": 30, # installers older than this are offered for the bin
@@ -43,6 +44,11 @@ def config_path() -> str:
 
 def journal_dir() -> str:
     return os.path.join(_base_dir(), "journal")
+
+
+def runtime_dir() -> str:
+    """Where the single-file Windows app unpacks itself (see build.bat)."""
+    return os.path.join(_base_dir(), "runtime")
 
 
 def default_folder() -> str:

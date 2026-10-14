@@ -377,6 +377,13 @@ Everything is stored in `%LOCALAPPDATA%\FileOrganiser\`:
 | `settings.json` | Your folder, options, theme and map settings. |
 | `journal\*.jsonl` | One undo record per run. Undone runs are renamed to `.undone`. Older versions used `.json`; these can still be undone. |
 | `auto.log` | Log of automatic and tray runs. Starts afresh after 1 MB, keeping one `auto.log.old`. |
+| `runtime\_MEI…` | Windows only: the single-file app unpacks itself here while it runs (about 60 MB) and removes it when it closes. |
+
+The app tidies up after itself each time it starts. It removes undo records
+older than six months, copies in `runtime` left by a crash or a forced close,
+and update downloads in your temp folder. It only touches its own files, and
+never anything in use. While it runs it uses around 50 MB of memory, which
+doesn't grow over time.
 
 A few settings have no control in the app. You can change them in
 `settings.json` while the app is closed:
@@ -388,6 +395,7 @@ A few settings have no control in the app. You can change them in
 | `overrides` | `{}` | Your file type rules, e.g. `{"pdf": "Documents/Receipts"}`. Easier to edit with **Custom rules…**. |
 | `name_rules` | `[]` | Your name rules, e.g. `[["invoice, receipt", "Documents/Receipts"]]`, checked in order. Easier to edit with **Custom rules…**. |
 | `welcomed` | `false` | Set back to `false` to see the welcome screen at the next start. |
+| `journal_days` | `180` | Undo records older than this many days are removed. `0` keeps them all. |
 
 ## Command line
 
@@ -498,7 +506,8 @@ organiser/
   graph.py                   the plan as a graph, and its force layout
   graphview.py               the Map tab: drawing and interaction
   theme.py                   the light and dark looks, tick boxes included
-  updates.py                 asking GitHub for a newer release
+  updates.py                 finding, checking and installing updates
+  housekeeping.py            clearing old undo records and leftover files
   system.py                  the differences between Windows and macOS
   cleanup.py                 Recycle Bin clear-outs, old installers
   recycle.py                 the Recycle Bin (Windows) and Trash (Mac)

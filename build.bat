@@ -8,8 +8,11 @@ if not exist build mkdir build
 python -c "from organiser.icon import save_ico; save_ico(r'build\icon.ico')" || goto :fail
 
 rem pystray picks its Windows backend at runtime, so name it explicitly.
+rem The exe unpacks itself into its own folder rather than %TEMP%, so copies
+rem left by a crash can be cleared safely (organiser\housekeeping.py).
 python -m PyInstaller --noconfirm --onefile --windowed --name FileOrganiser ^
-    --icon build\icon.ico --hidden-import pystray._win32 app.py || goto :fail
+    --icon build\icon.ico --hidden-import pystray._win32 ^
+    --runtime-tmpdir "%%LOCALAPPDATA%%\FileOrganiser\runtime" app.py || goto :fail
 
 set "ISCC="
 for %%P in ("%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Setup 6\ISCC.exe" "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe") do (

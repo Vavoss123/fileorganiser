@@ -201,6 +201,7 @@ def download(asset: Asset, progress: Callable[[int, int], None] | None = None,
         raise UpdateError("That download isn't from File Organiser's own releases.")
     if not asset.sha256:
         raise UpdateError("GitHub gave no checksum for the update, so it can't be checked.")
+    # The name matches housekeeping.UPDATE_DOWNLOADS, which clears these away.
     folder = folder or tempfile.mkdtemp(prefix="FileOrganiser-update-")
     path = os.path.join(folder, asset.name)
     digest = hashlib.sha256()

@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from organiser import apply as apply_module  # noqa: E402
 from organiser import auto, cleanup, config, duplicates, plan as plan_module, rules, scan, startup, tray  # noqa: E402,E501
-from organiser import system, theme, updates  # noqa: E402
+from organiser import housekeeping, system, theme, updates  # noqa: E402
 from organiser.graphview import GraphView  # noqa: E402
 
 CHECK = "✓"
@@ -1976,6 +1976,7 @@ def main() -> None:
             with open(os.path.join(smoke, "messy", name), "wb") as handle:
                 handle.write(b"same" if "photo" in name else name.encode())
         config.save(dict(config.load(), welcomed=True, check_updates=False, settle_seconds=0))
+    housekeeping.run()
     if "--auto" in sys.argv[1:]:
         auto.run()
         return
@@ -1983,7 +1984,6 @@ def main() -> None:
         tray.run()
         return
     _sharpen_on_high_dpi()
-    updates.clean_up()
     root = tk.Tk()
     root.title("File Organiser")
     root.geometry("1180x840")

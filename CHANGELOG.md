@@ -19,6 +19,10 @@ started: Receipts, Statements, Travel, CVs, Contracts and Wallpapers.
 changed for 3 months, 6 months or a year into an Archive folder. They're
 sorted the same way inside it, out of the way but never deleted.
 
+**Tidies up after itself.** The app now clears away what it leaves on disk:
+copies of itself left behind if it was force-closed (about 60 MB each on
+Windows), downloaded updates, and undo history older than six months.
+
 ## v1.3
 
 **File Organiser now runs on Mac.** Download `FileOrganiser-mac.dmg`, open it,
