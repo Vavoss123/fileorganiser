@@ -37,6 +37,14 @@ class RuleTests(unittest.TestCase):
         self.assertEqual(rules.destination_for("notes.txt"), "Documents")
         self.assertEqual(rules.destination_for("budget.xlsx"), "Documents/Spreadsheets")
 
+    def test_less_common_types(self):
+        self.assertEqual(rules.destination_for("photo.jxl"), "Pictures")
+        self.assertEqual(rules.destination_for("00012.MTS"), "Videos")
+        self.assertEqual(rules.destination_for("film.en.srt"), "Videos")
+        self.assertEqual(rules.destination_for("audiobook.m4b"), "Audio")
+        self.assertEqual(rules.destination_for("letter.dotx"), "Documents")
+        self.assertEqual(rules.destination_for("talk.ppsx"), "Documents/Presentations")
+
     def test_application_files_get_their_own_folder(self):
         self.assertEqual(rules.destination_for("donut.blend"), "Apps/Blender")
         self.assertEqual(rules.destination_for("donut.blend1"), "Apps/Blender")

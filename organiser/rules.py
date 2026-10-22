@@ -26,15 +26,16 @@ def _add(table: dict[str, str], destination: str, extensions: str) -> None:
         table[ext.lower()] = destination
 
 
-_add(TYPE_RULES, "Pictures", "jpg jpeg png gif bmp tiff tif webp heic heif ico avif jfif jpe")
+_add(TYPE_RULES, "Pictures", "jpg jpeg png gif bmp tiff tif webp heic heif ico avif jfif jpe jxl")
 _add(TYPE_RULES, "Pictures/Raw", "cr2 cr3 nef arw dng raf orf rw2 pef srw")
 _add(TYPE_RULES, "Pictures/Vector", "svg")
 _add(TYPE_RULES, "Pictures/Screenshots", "")  # populated by name heuristics
-_add(TYPE_RULES, "Videos", "mp4 mkv avi mov wmv flv webm m4v mpg mpeg mpe 3gp ts m2ts vob ogv")
-_add(TYPE_RULES, "Audio", "mp3 wav flac aac ogg oga m4a wma opus aiff aif mid midi amr")
-_add(TYPE_RULES, "Documents", "pdf doc docx odt rtf txt md markdown tex pages xps djvu")
-_add(TYPE_RULES, "Documents/Spreadsheets", "xls xlsx xlsm xlsb csv tsv ods numbers")
-_add(TYPE_RULES, "Documents/Presentations", "ppt pptx pptm odp key")
+_add(TYPE_RULES, "Videos", "mp4 mkv avi mov wmv flv webm m4v mpg mpeg mpe 3gp ts m2ts mts vob ogv")
+_add(TYPE_RULES, "Videos", "srt vtt")  # subtitles, kept with the films they belong to
+_add(TYPE_RULES, "Audio", "mp3 wav flac aac ogg oga m4a m4b m4r wma opus aiff aif mid midi amr")
+_add(TYPE_RULES, "Documents", "pdf doc docx docm dotx odt rtf txt md markdown tex pages xps djvu")
+_add(TYPE_RULES, "Documents/Spreadsheets", "xls xlsx xlsm xlsb xltx csv tsv ods numbers")
+_add(TYPE_RULES, "Documents/Presentations", "ppt pptx pptm ppsx potx odp key")
 _add(TYPE_RULES, "Documents/Ebooks", "epub mobi azw azw3 fb2 cbz cbr")
 _add(TYPE_RULES, "Archives", "zip rar 7z tar gz tgz bz2 tbz2 xz zst lz4 cab arj lzh")
 _add(TYPE_RULES, "Installers", "exe msi msix msixbundle appx appxbundle appinstaller msu "
